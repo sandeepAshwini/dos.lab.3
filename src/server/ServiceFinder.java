@@ -139,4 +139,18 @@ public class ServiceFinder implements ServiceFinderInterface {
 		}
 		return matchingServices;
 	}
+	
+	
+	public ServerDetail getServer(String serverName)
+			throws RemoteException {
+		synchronized (this.services) {
+			for (ServerDetail curServerDetail : this.services) {
+				if (curServerDetail.getServerName().equals(serverName)) {
+					return curServerDetail;
+				}
+			}
+		}
+		return null;
+	}
+	
 }

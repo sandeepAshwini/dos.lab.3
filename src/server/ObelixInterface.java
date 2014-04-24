@@ -39,5 +39,18 @@ public interface ObelixInterface extends Remote {
 	public String conductLottery() throws RemoteException;
 	
 	public String getLotteryWinner(String clientID) throws RemoteException;
-
+	
+	
+	public void notifyScoreCaching(String serverID, EventCategories eventName)throws RemoteException;
+	public void notifyResultCaching(String serverID, EventCategories eventName)throws RemoteException;
+	public void notifyTallyCaching(String serverID, NationCategories nation)throws RemoteException;
+	
+	public void invalidateScores(EventCategories eventName) throws RemoteException;
+	public void invalidateResults(EventCategories eventName) throws RemoteException;
+	public void invalidateTallies(NationCategories nation) throws RemoteException;
+	
+	public void notifyMaster() throws RemoteException;
+	
+	public void setMaster(String masterName) throws RemoteException;
+	
 }

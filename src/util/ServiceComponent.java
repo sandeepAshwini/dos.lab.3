@@ -6,6 +6,7 @@ import java.rmi.registry.Registry;
 import java.util.List;
 import java.util.Random;
 
+import server.ServiceFinder;
 import server.ServiceFinderInterface;
 import base.OlympicException;
 
@@ -109,6 +110,12 @@ public abstract class ServiceComponent {
 		return serviceFinderStub.getService(serviceName);
 	}
 
+	public ServerDetail getSpecificServerDetails(String serverName)
+			throws RemoteException {
+		return serviceFinderStub.getServer(serverName);
+	}
+
+	
 	/**
 	 * Retreives the server details of all the servers offering a specified
 	 * service.

@@ -49,7 +49,7 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 	private String tallyFileName;
 	private String scoreFileName;
 	private String dbName;
-
+	
 	public Orgetorix(String serviceFinderHost, int serviceFinderPort) {
 		super(ORGETORIX_SERVICE_NAME, serviceFinderHost, serviceFinderPort);
 		this.dbName = UUID.randomUUID().toString();
@@ -61,6 +61,7 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 		} catch (RemoteException e) {
 			e.printStackTrace();
 		}
+
 	}
 
 	/**
@@ -305,7 +306,7 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 			System.err.println("Orgetorix ready.");
 		} catch (RemoteException e) {
 			registry = regService.setupLocalRegistry(JAVA_RMI_PORT);
-//			registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
+			// registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(this.getServerName(), serverStub);
 			System.err
 					.println("New Registry Service created. Orgetorix ready.");

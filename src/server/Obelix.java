@@ -1,6 +1,7 @@
 package server;
 
 import java.io.IOException;
+import java.net.SocketException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -13,15 +14,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import util.LotteryManager;
 import util.BullyElectedBerkeleySynchronized;
 import util.LamportClock;
 import util.Lottery;
+import util.LotteryManager;
 import util.RegistryService;
 import util.ServerDetail;
 import base.Athlete;
 import base.Event;
 import base.EventCategories;
+import base.MedalCategories;
 import base.NationCategories;
 import base.OlympicException;
 import base.Results;
@@ -45,8 +47,12 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 * Various data structures forming Obelix's database for the games.
 	 */
 	private Set<Event> completedEvents;
-	private Map<NationCategories, Tally> medalTallies;
-	private Map<EventCategories, ArrayList<Athlete>> scores;
+
+	private ScoreCache scoreCache;
+	private ResultCache resultCache;
+	private TallyCache tallyCache;
+
+	private boolean isMaster = false;
 
 	/**
 	 * Data structures to manage event subscriptions.private
@@ -62,6 +68,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	private static String JAVA_RMI_HOSTNAME_PROPERTY = "java.rmi.server.hostname";
 	private static String SERVICE_FINDER_HOST;
 	private static int SERVICE_FINDER_PORT;
+	private static boolean MASTER_PUSH;
 	private OrgetorixInterface orgetorixStub;
 	private Lottery lottery = new Lottery();
 	private boolean lotteryFrozen;
@@ -69,19 +76,23 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 
 	private String lotteryWinner;
 
+	private String OBELIX_MASTER_NAME;
+	private Map<String, Set<EventCategories>> scoreCacherList;
+	private Map<String, Set<EventCategories>> resultCacherList;
+	private Map<String, Set<NationCategories>> tallyCacherList;
+
 	public Obelix(String serviceFinderHost, int serviceFinderPort) {
 		super(OBELIX_SERVICE_NAME, serviceFinderHost, serviceFinderPort);
 		this.completedEvents = new HashSet<Event>();
-		this.medalTallies = new HashMap<NationCategories, Tally>();
-		this.scores = new HashMap<EventCategories, ArrayList<Athlete>>();
 		this.subscriptionMap = new HashMap<EventCategories, Subscription>();
 		this.subscriberHostMap = new HashMap<String, String>();
 		this.lotteryFrozen = false;
 		this.lotteryWinner = null;
 
-		for (NationCategories nation : NationCategories.values()) {
-			this.medalTallies.put(nation, new Tally());
-		}
+		this.tallyCache = new TallyCache();
+		this.scoreCache = new ScoreCache();
+		this.resultCache = new ResultCache();
+
 	}
 
 	/**
@@ -106,6 +117,40 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 		}
 	}
 
+	private ObelixInterface getObelixMasterStub() {
+		Registry registry = null;
+		ObelixInterface obelixMasterStub = null;
+		try {
+			ServerDetail obelixMasterDetail = this
+					.getSpecificServerDetails(OBELIX_MASTER_NAME);
+			registry = LocateRegistry.getRegistry(
+					obelixMasterDetail.getServiceAddress(),
+					obelixMasterDetail.getServicePort());
+			obelixMasterStub = (ObelixInterface) registry
+					.lookup(obelixMasterDetail.getServerName());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return obelixMasterStub;
+	}
+
+	private ObelixInterface getObelixSlaveStub(String serverName) {
+		Registry registry = null;
+		ObelixInterface obelixSlaveStub = null;
+		try {
+			ServerDetail obelixSlaveDetail = this
+					.getSpecificServerDetails(serverName);
+			registry = LocateRegistry.getRegistry(
+					obelixSlaveDetail.getServiceAddress(),
+					obelixSlaveDetail.getServicePort());
+			obelixSlaveStub = (ObelixInterface) registry
+					.lookup(obelixSlaveDetail.getServerName());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return obelixSlaveStub;
+	}
+
 	private static Obelix getObelixInstance() {
 		if (Obelix.obelixServerInstance == null) {
 			Obelix.obelixServerInstance = new Obelix(SERVICE_FINDER_HOST,
@@ -120,7 +165,16 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 */
 	public void updateResultsAndTallies(Event simulatedEvent)
 			throws RemoteException {
+		this.notifyMaster();
 		System.err.println("Received updateResultsAndTallies msg.");
+		if (MASTER_PUSH == true) {
+			System.err.println("Invalidating results and tallies in caches.");
+			this.cleanUpResultCaches(simulatedEvent.getName());
+			for (MedalCategories medalType : MedalCategories.values()) {
+				this.cleanUpTallyCaches(simulatedEvent.getResult().getTeam(
+						medalType));
+			}
+		}
 		orgetorixStub.updateResultsAndTallies(simulatedEvent);
 
 	}
@@ -133,7 +187,12 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 */
 	public void updateCurrentScores(EventCategories eventName,
 			List<Athlete> currentScores) throws RemoteException {
+		this.notifyMaster();
 		System.err.println("Received updateCurrentScores msg.");
+		if (MASTER_PUSH == true) {
+			System.err.println("Invalidating scores in caches.");
+			this.cleanUpScoreCaches(eventName);
+		}
 		pushCurrentScores(eventName, currentScores);
 		orgetorixStub.updateCurrentScores(eventName, currentScores);
 	}
@@ -180,11 +239,38 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 * completed event.
 	 */
 	public Results getResults(EventCategories eventName, String clientID) {
-		System.err.println("Sending results for " + eventName + ".");
 		try {
 			this.notifyEvent(clientID);
-			Results result = orgetorixStub.getResults(eventName);
-			return result;
+			try {
+				Results result = null;
+				if (MASTER_PUSH == false) {
+					result = this.resultCache.getResults(eventName,
+							System.currentTimeMillis());
+				} else {
+					result = this.resultCache.getResults(eventName);
+				}
+				System.out.println("Sending results for " + eventName + " from cache.");
+				return result;
+			} catch (OlympicException o) {
+				if (MASTER_PUSH == true) {
+					ObelixInterface masterStub = this.getObelixMasterStub();
+					masterStub.notifyResultCaching(this.getServerName(),
+							eventName);
+				}
+				System.out.println("Sending results for " + eventName + " from database.");
+				Results result = orgetorixStub.getResults(eventName);
+				if (result == null) {
+					return null;
+				}
+				if (MASTER_PUSH == false) {
+					this.resultCache.cache(eventName, result,
+							System.currentTimeMillis());
+				} else {
+					this.resultCache.cache(eventName, result);
+
+				}
+				return result;
+			}
 		} catch (RemoteException r) {
 			return null;
 		}
@@ -197,10 +283,40 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 */
 	public List<Athlete> getCurrentScores(EventCategories eventName,
 			String clientID) throws RemoteException {
-		System.err.println("Sending current scores for " + eventName + ".");
 		try {
 			this.notifyEvent(clientID);
-			return orgetorixStub.getCurrentScores(eventName);
+			try {
+				List<Athlete> scores = null;
+				if (MASTER_PUSH == false) {
+					scores = this.scoreCache.getScores(eventName,
+							System.currentTimeMillis());
+				} else {
+					scores = this.scoreCache.getScores(eventName);
+				}
+				System.out.println("Sending current scores for " + eventName + " from cache.");
+				return scores;
+			} catch (OlympicException o) {
+				if (MASTER_PUSH == true) {
+					ObelixInterface masterStub = this.getObelixMasterStub();
+					masterStub.notifyScoreCaching(this.getServerName(),
+							eventName);
+				}
+				List<Athlete> scores = orgetorixStub
+						.getCurrentScores(eventName);
+
+				System.out.println("Sending current scores for " + eventName + " from database.");
+				if (scores == null) {
+					return null;
+				}
+				if (MASTER_PUSH == false) {
+					this.scoreCache.cache(eventName, scores,
+							System.currentTimeMillis());
+				} else {
+					this.scoreCache.cache(eventName, scores);
+
+				}
+				return scores;
+			}
 		} catch (RemoteException r) {
 			return null;
 
@@ -212,10 +328,38 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 * particular team.
 	 */
 	public Tally getMedalTally(NationCategories teamName, String clientID) {
-		System.err.println("Sending medal tally for " + teamName + ".");
 		try {
 			this.notifyEvent(clientID);
-			return orgetorixStub.getMedalTally(teamName);
+			try {
+				Tally medalTally = null;
+				if (MASTER_PUSH == false) {
+					medalTally = this.tallyCache.getTally(teamName,
+							System.currentTimeMillis());
+				} else {
+					medalTally = this.tallyCache.getTally(teamName);
+				}
+				System.out.println("Sending medal tally for " + teamName + " from cache.");
+				return medalTally;
+			} catch (OlympicException o) {
+				if (MASTER_PUSH == true) {
+					ObelixInterface masterStub = this.getObelixMasterStub();
+					masterStub.notifyTallyCaching(this.getServerName(),
+							teamName);
+				}
+				Tally medalTally = orgetorixStub.getMedalTally(teamName);
+				System.out.println("Sending medal tally for " + teamName + " from database.");
+				if (medalTally == null) {
+					return null;
+				}
+				if (MASTER_PUSH == false) {
+					this.tallyCache.cache(teamName, medalTally,
+							System.currentTimeMillis());
+				} else {
+					this.tallyCache.cache(teamName, medalTally);
+				}
+
+				return medalTally;
+			}
 		} catch (RemoteException r) {
 			return null;
 		}
@@ -375,7 +519,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 			System.err.println("Obelix ready.");
 		} catch (RemoteException e) {
 			registry = regService.setupLocalRegistry(JAVA_RMI_PORT);
-//			registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
+			// registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(this.getServerName(), serverStub);
 			System.err.println("New Registry Service created. Obelix ready.");
 		}
@@ -391,9 +535,14 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	public static void main(String args[]) throws OlympicException {
 		// Bind the remote object's stub in the registry
 		SERVICE_FINDER_HOST = (args.length < 1) ? null : args[0];
-		SERVICE_FINDER_PORT = (args.length < 2) ? DEFAULT_JAVA_RMI_PORT
+		if (args[1].compareTo("--masterpush") == 0) {
+			MASTER_PUSH = true;
+		} else {
+			MASTER_PUSH = false;
+		}
+		SERVICE_FINDER_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT
 				: Integer.parseInt(args[1]);
-		JAVA_RMI_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT : Integer
+		JAVA_RMI_PORT = (args.length < 4) ? DEFAULT_JAVA_RMI_PORT : Integer
 				.parseInt(args[2]);
 		final Obelix obelixInstance = Obelix.getObelixInstance();
 		try {
@@ -608,6 +757,119 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 		} else {
 			return this.lotteryWinner;
 		}
+	}
+
+	@Override
+	public void notifyScoreCaching(String serverID, EventCategories eventName)
+			throws RemoteException {
+		Set<EventCategories> cachedEvents = new HashSet<EventCategories>();
+		if (this.scoreCacherList.containsKey(serverID)) {
+			cachedEvents = this.scoreCacherList.get(serverID);
+		}
+		cachedEvents.add(eventName);
+		this.scoreCacherList.put(serverID, cachedEvents);
+
+	}
+
+	@Override
+	public void notifyResultCaching(String serverID, EventCategories eventName)
+			throws RemoteException {
+		Set<EventCategories> cachedResults = new HashSet<EventCategories>();
+		if (this.scoreCacherList.containsKey(serverID)) {
+			cachedResults = this.scoreCacherList.get(serverID);
+		}
+		cachedResults.add(eventName);
+		this.scoreCacherList.put(serverID, cachedResults);
+
+	}
+
+	@Override
+	public void notifyTallyCaching(String serverID, NationCategories nation)
+			throws RemoteException {
+		Set<NationCategories> cachedTallies = new HashSet<NationCategories>();
+		if (this.tallyCacherList.containsKey(serverID)) {
+			cachedTallies = this.tallyCacherList.get(serverID);
+		}
+		cachedTallies.add(nation);
+		this.tallyCacherList.put(serverID, cachedTallies);
+	}
+
+	@Override
+	public void invalidateScores(EventCategories eventName) {
+		System.out.println("Invalidating score cache for " + eventName + " .");
+		this.scoreCache.invalidateEntry(eventName);
+	}
+
+	@Override
+	public void invalidateResults(EventCategories eventName) {
+		System.out.println("Invalidating result cache for " + eventName + " .");
+		this.resultCache.invalidateEntry(eventName);
+	}
+
+	@Override
+	public void invalidateTallies(NationCategories nation) {
+		System.out.println("Invalidating tally cache for " + nation + " .");
+		this.tallyCache.invalidateEntry(nation);
+	}
+
+	private void cleanUpTallyCaches(NationCategories nation)
+			throws RemoteException {
+		for (String subscriber : this.tallyCacherList.keySet()) {
+			ObelixInterface stub = this.getObelixSlaveStub(subscriber);
+			stub.invalidateTallies(nation);
+		}
+	}
+
+	private void cleanUpResultCaches(EventCategories eventName)
+			throws RemoteException {
+		for (String subscriber : this.resultCacherList.keySet()) {
+			ObelixInterface stub = this.getObelixSlaveStub(subscriber);
+			stub.invalidateResults(eventName);
+		}
+	}
+
+	private void cleanUpScoreCaches(EventCategories eventName)
+			throws RemoteException {
+		for (String subscriber : this.scoreCacherList.keySet()) {
+			ObelixInterface stub = this.getObelixSlaveStub(subscriber);
+			stub.invalidateScores(eventName);
+		}
+	}
+
+	public void notifyMaster() throws RemoteException {
+		if (this.isMaster == true) {
+			return;
+		} else {
+			try {
+				this.broadCastMaster();
+				RegistryService regService = new RegistryService();
+				System.setProperty(JAVA_RMI_HOSTNAME_PROPERTY,
+						regService.getLocalIPAddress());
+				this.register(OBELIX_MASTER_NAME,
+						regService.getLocalIPAddress(), JAVA_RMI_PORT);
+			} catch (RemoteException | SocketException e) {
+				e.printStackTrace();
+			}
+			this.isMaster = true;
+			this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
+			this.resultCacherList = new HashMap<String, Set<EventCategories>>();
+			this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
+		}
+	}
+
+	public void broadCastMaster() throws RemoteException {
+		List<ServerDetail> participants = new ArrayList<ServerDetail>();
+		participants.addAll(findAllParticipants(OBELIX_SERVICE_NAME));
+		for (ServerDetail participant : participants) {
+			ObelixInterface stub = this.getObelixSlaveStub(participant
+					.getServerName());
+			stub.setMaster(this.getServerName());
+		}
+	}
+
+	@Override
+	public void setMaster(String masterName) throws RemoteException {
+		this.OBELIX_MASTER_NAME = masterName;
 	}
 
 }
