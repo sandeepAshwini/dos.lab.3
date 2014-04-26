@@ -78,7 +78,7 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 	 */
 	public void updateCurrentScores(Event simulatedEvent,
 			List<Athlete> currentScores) throws RemoteException {
-		System.err.println("Sending updatedCurrentScores msg.");
+		System.err.println("Sending updatedCurrentScores msg");
 		if (clientStub != null) {
 			clientStub.updateCurrentScores(simulatedEvent.getName(),
 					currentScores);
