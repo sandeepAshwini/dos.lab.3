@@ -19,6 +19,7 @@ import java.util.UUID;
 
 import util.BullyElectedBerkeleySynchronized;
 import util.RegistryService;
+import util.ServiceComponent;
 import base.Athlete;
 import base.Event;
 import base.EventCategories;
@@ -36,8 +37,7 @@ import base.Tally;
  * @author aravind
  * 
  */
-public class Orgetorix extends BullyElectedBerkeleySynchronized implements
-		OrgetorixInterface {
+public class Orgetorix extends ServiceComponent implements OrgetorixInterface {
 	private static String JAVA_RMI_HOSTNAME_PROPERTY = "java.rmi.server.hostname";
 	private static String FILE_LOCATION = "./";
 	private static String ORGETORIX_SERVICE_NAME = "Orgetorix";
@@ -49,7 +49,7 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 	private String tallyFileName;
 	private String scoreFileName;
 	private String dbName;
-	
+
 	public Orgetorix(String serviceFinderHost, int serviceFinderPort) {
 		super(ORGETORIX_SERVICE_NAME, serviceFinderHost, serviceFinderPort);
 		this.dbName = UUID.randomUUID().toString();
@@ -75,14 +75,16 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 		Map<NationCategories, Tally> medalTallies = new HashMap<NationCategories, Tally>();
 		for (NationCategories nation : NationCategories.values()) {
 			medalTallies.put(nation, new Tally());
-			medalTallies.get(nation).setTimestamp(this.getTime());
+			//medalTallies.get(nation).setTimestamp(this.getTime());
+			medalTallies.get(nation).setTimestamp(System.currentTimeMillis());
 		}
 		this.writeToDatabase(medalTallies, this.tallyFileName);
 		Map<EventCategories, ArrayList<Athlete>> scores = new HashMap<EventCategories, ArrayList<Athlete>>();
 		for (EventCategories event : EventCategories.values()) {
 			scores.put(event, new ArrayList<Athlete>());
 			for (Athlete athleteScore : scores.get(event)) {
-				athleteScore.setTimestamp(this.getTime());
+				//athleteScore.setTimestamp(this.getTime());
+				athleteScore.setTimestamp(System.currentTimeMillis());
 			}
 		}
 		this.writeToDatabase(scores, this.scoreFileName);
@@ -112,7 +114,8 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 		completedEvents.add(completedEvent);
 
 		for (Event event : completedEvents) {
-			event.getResult().setTimestamp(this.getTime());
+			//event.getResult().setTimestamp(this.getTime());
+			event.getResult().setTimestamp(System.currentTimeMillis());
 		}
 
 		writeToDatabase(completedEvents, this.resultFileName);
@@ -132,7 +135,8 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 		}
 
 		for (NationCategories nation : medalTallies.keySet()) {
-			medalTallies.get(nation).setTimestamp(this.getTime());
+			//medalTallies.get(nation).setTimestamp(this.getTime());
+			medalTallies.get(nation).setTimestamp(System.currentTimeMillis());
 		}
 
 		writeToDatabase(medalTallies, this.tallyFileName);
@@ -150,7 +154,8 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 			List<Athlete> currentScores) throws RemoteException {
 		Map<EventCategories, ArrayList<Athlete>> scores = readScoreFile();
 		for (Athlete athleteScore : currentScores) {
-			athleteScore.setTimestamp(this.getTime());
+			//athleteScore.setTimestamp(this.getTime());
+			athleteScore.setTimestamp(System.currentTimeMillis());
 		}
 		scores.put(eventType, (ArrayList<Athlete>) currentScores);
 
@@ -314,7 +319,13 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 	}
 
 	public static void main(String[] args) throws OlympicException {
-		SERVICE_FINDER_HOST = (args.length < 1) ? null : args[0];
+		if (args.length < 1) {
+			usage();
+			System.exit(-1);
+		} else {
+			SERVICE_FINDER_HOST = args[0];
+		}
+		
 		SERVICE_FINDER_PORT = (args.length < 2) ? DEFAULT_JAVA_RMI_PORT
 				: Integer.parseInt(args[1]);
 		JAVA_RMI_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT : Integer
@@ -326,10 +337,16 @@ public class Orgetorix extends BullyElectedBerkeleySynchronized implements
 			System.setProperty(JAVA_RMI_HOSTNAME_PROPERTY,
 					regService.getLocalIPAddress());
 			orgetorixInstance.setupOrgetorixServer(regService);
-			orgetorixInstance.initiateElection();
+			//orgetorixInstance.initiateElection();
 		} catch (IOException e) {
 			throw new OlympicException(
 					"Registry Service could not be created.", e);
 		}
+	}
+
+	private static void usage() {
+		System.out.println("java -cp ./bin/ -Djava.rmi.server.codebase=file:./bin/"
+				+ " server.Orgetorix <insert host address displayed by ServiceFinder>"
+				+ " <insert port number displayed by ServiceFinder> [RMI_PORT]");
 	}
 }

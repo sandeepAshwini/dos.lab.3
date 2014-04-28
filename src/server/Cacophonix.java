@@ -1,6 +1,7 @@
 package server;
 
 import java.io.IOException;
+import java.rmi.ConnectException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -29,10 +30,12 @@ import base.OlympicException;
 public class Cacophonix extends ServiceComponent implements CacophonixInterface {
 
 	private static String CACOPHONIX_SERVICE_NAME = "Cacophonix";
-	private static String OBELIX_SERVER_NAME = "Obelix";
+	private static String OBELIX_SERVICE_NAME = "Obelix";
 	private static String JAVA_RMI_HOSTNAME_PROPERTY = "java.rmi.server.hostname";
 	private static String SERVICE_FINDER_HOST;
 	private static int SERVICE_FINDER_PORT;
+	private static int RETRY_LIMIT = 3;
+	private static int RETRY_WAIT = 3000;
 
 	// To prevent the server from being garbage collected.
 	private static Cacophonix cacophonixServerInstance;
@@ -65,9 +68,12 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 	 */
 	public void updateResultsAndTallies(Event simulatedEvent)
 			throws RemoteException {
+		//TODO: Handle null properly here. Serious issue.
 		System.err.println("Sending updateResultsAndTallies msg.");
+		Cacophonix.getCacophonixInstance().setupClientInstance();
 		if (clientStub != null) {
 			clientStub.updateResultsAndTallies(simulatedEvent);
+			return;
 		}
 	}
 
@@ -78,10 +84,13 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 	 */
 	public void updateCurrentScores(Event simulatedEvent,
 			List<Athlete> currentScores) throws RemoteException {
-		System.err.println("Sending updatedCurrentScores msg");
+		//TODO: Handle null properly here. Serious issue.
+		System.err.println("Sending updatedCurrentScores msg.");
+		Cacophonix.getCacophonixInstance().setupClientInstance();
 		if (clientStub != null) {
 			clientStub.updateCurrentScores(simulatedEvent.getName(),
 					currentScores);
+			return;
 		}
 	}
 
@@ -92,7 +101,12 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 	 * @throws OlympicException
 	 */
 	public static void main(String args[]) throws OlympicException {
-		SERVICE_FINDER_HOST = (args.length < 1) ? null : args[0];
+		if (args.length < 1) {
+			usage();
+			System.exit(-1);
+		} else {
+			SERVICE_FINDER_HOST = args[0];
+		}
 		SERVICE_FINDER_PORT = (args.length < 2) ? DEFAULT_JAVA_RMI_PORT
 				: Integer.parseInt(args[1]);
 		JAVA_RMI_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT : Integer
@@ -107,6 +121,13 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 		} catch (IOException e) {
 			throw new OlympicException("Could not create Registry.", e);
 		}
+	}
+
+	private static void usage() {
+		System.out
+				.println("java -cp ./bin/ -Djava.rmi.server.codebase=file:./bin/"
+						+ " server.Cacophonix <insert host address displayed by ServiceFinder>"
+						+ " <insert port number displayed by ServiceFinder> [RMI_PORT]");
 	}
 
 	/**
@@ -133,7 +154,7 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 			System.err.println("Cacophonix ready.");
 		} catch (RemoteException e) {
 			registry = regService.setupLocalRegistry(JAVA_RMI_PORT);
-//			registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
+			// registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(this.getServerName(), serverStub);
 			System.err
 					.println("New Registry Service created. Cacophonix ready.");
@@ -150,28 +171,42 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 	private ObelixInterface setupClientInstance() {
 		Registry registry = null;
 		ObelixInterface clientStub = null;
-		try {
-			ServerDetail obelixDetail = this
-					.getServerDetails(OBELIX_SERVER_NAME);
-			registry = LocateRegistry.getRegistry(
-					obelixDetail.getServiceAddress(),
-					obelixDetail.getServicePort());
-			clientStub = (ObelixInterface) registry.lookup(obelixDetail
-					.getServerName());
-			Cacophonix.getCacophonixInstance().clientStub = clientStub;
-		} catch (RemoteException e) {
-			e.printStackTrace();
-		} catch (NotBoundException e) {
-			e.printStackTrace();
+		
+		for (int i = 0; i < RETRY_LIMIT; i++) {
+			try {
+				ServerDetail obelixDetail = this.getServerDetails(
+						OBELIX_SERVICE_NAME, this.getServerName());
+				registry = LocateRegistry.getRegistry(
+						obelixDetail.getServiceAddress(),
+						obelixDetail.getServicePort());
+				clientStub = (ObelixInterface) registry.lookup(obelixDetail
+						.getServerName());
+				Cacophonix.getCacophonixInstance().clientStub = clientStub;
+			} catch (ConnectException e) {
+				if (i >= RETRY_LIMIT) {
+					e.printStackTrace();
+				}
+				try {
+					Thread.sleep(RETRY_WAIT);
+				} catch (InterruptedException e1) {
+					e1.printStackTrace();
+				}
+			} catch (RemoteException e) {
+				e.printStackTrace();
+			} catch (NotBoundException e) {
+				e.printStackTrace();
+			}
 		}
+		
 		return clientStub;
 	}
 
-	/**
-	 * Propagates the conductLottery message to Obelix.
-	 */
-	@Override
-	public String conductLottery() throws RemoteException {
-		return clientStub.conductLottery();
-	}
+//	/**
+//	 * Propagates the conductLottery message to Obelix.
+//	 */
+//	@Override
+//	public String conductLottery() throws RemoteException {
+//		Cacophonix.getCacophonixInstance().setupClientInstance();
+//		return clientStub.conductLottery();
+//	}
 }

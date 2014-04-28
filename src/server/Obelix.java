@@ -2,6 +2,7 @@ package server;
 
 import java.io.IOException;
 import java.net.SocketException;
+import java.rmi.ConnectException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -20,6 +21,7 @@ import util.Lottery;
 import util.LotteryManager;
 import util.RegistryService;
 import util.ServerDetail;
+import util.ServiceComponent;
 import base.Athlete;
 import base.Event;
 import base.EventCategories;
@@ -40,8 +42,7 @@ import client.TabletInterface;
  * @author aravind
  * 
  */
-public class Obelix extends BullyElectedBerkeleySynchronized implements
-		LotteryManager, ObelixInterface {
+public class Obelix extends ServiceComponent implements ObelixInterface {
 
 	/**
 	 * Various data structures forming Obelix's database for the games.
@@ -70,11 +71,10 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	private static int SERVICE_FINDER_PORT;
 	private static boolean MASTER_PUSH;
 	private OrgetorixInterface orgetorixStub;
-	private Lottery lottery = new Lottery();
-	private boolean lotteryFrozen;
-	private Integer localRequestCounter = 0;
-
-	private String lotteryWinner;
+//	private Lottery lottery = new Lottery();
+//	private boolean lotteryFrozen;
+//	private Integer localRequestCounter = 0;
+//	private String lotteryWinner;
 
 	private String OBELIX_MASTER_NAME;
 	private Map<String, Set<EventCategories>> scoreCacherList;
@@ -86,8 +86,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 		this.completedEvents = new HashSet<Event>();
 		this.subscriptionMap = new HashMap<EventCategories, Subscription>();
 		this.subscriberHostMap = new HashMap<String, String>();
-		this.lotteryFrozen = false;
-		this.lotteryWinner = null;
+//		this.lotteryFrozen = false;
+//		this.lotteryWinner = null;
 
 		this.tallyCache = new TallyCache();
 		this.scoreCache = new ScoreCache();
@@ -134,7 +134,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 		return obelixMasterStub;
 	}
 
-	private ObelixInterface getObelixSlaveStub(String serverName) {
+	private ObelixInterface getObelixSlaveStub(String serverName) throws RemoteException {
 		Registry registry = null;
 		ObelixInterface obelixSlaveStub = null;
 		try {
@@ -143,20 +143,26 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 			registry = LocateRegistry.getRegistry(
 					obelixSlaveDetail.getServiceAddress(),
 					obelixSlaveDetail.getServicePort());
-			obelixSlaveStub = (ObelixInterface) registry
-					.lookup(obelixSlaveDetail.getServerName());
-		} catch (Exception e) {
+			obelixSlaveStub = (ObelixInterface) registry.lookup(obelixSlaveDetail
+					.getServerName());
+		} catch (NotBoundException e) {
 			e.printStackTrace();
 		}
 		return obelixSlaveStub;
 	}
 
 	private static Obelix getObelixInstance() {
-		if (Obelix.obelixServerInstance == null) {
-			Obelix.obelixServerInstance = new Obelix(SERVICE_FINDER_HOST,
+		if (obelixServerInstance == null) {
+			obelixServerInstance = new Obelix(SERVICE_FINDER_HOST,
 					SERVICE_FINDER_PORT);
 		}
-		return Obelix.obelixServerInstance;
+		return obelixServerInstance;
+	}
+
+	private void setupHeartbeatThread() {
+		Thread heartbeatThread = new Thread(new HeartbeatNotifier(this),
+				"HeartbeatThread");
+		heartbeatThread.start();
 	}
 
 	/**
@@ -240,7 +246,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 */
 	public Results getResults(EventCategories eventName, String clientID) {
 		try {
-			this.notifyEvent(clientID);
+			// this.notifyEvent(clientID);
 			try {
 				Results result = null;
 				if (MASTER_PUSH == false) {
@@ -249,7 +255,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 				} else {
 					result = this.resultCache.getResults(eventName);
 				}
-				System.out.println("Sending results for " + eventName + " from cache.");
+				System.out.println("Sending results for " + eventName
+						+ " from cache.");
 				return result;
 			} catch (OlympicException o) {
 				if (MASTER_PUSH == true) {
@@ -257,7 +264,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 					masterStub.notifyResultCaching(this.getServerName(),
 							eventName);
 				}
-				System.out.println("Sending results for " + eventName + " from database.");
+				System.out.println("Sending results for " + eventName
+						+ " from database.");
 				Results result = orgetorixStub.getResults(eventName);
 				if (result == null) {
 					return null;
@@ -284,7 +292,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	public List<Athlete> getCurrentScores(EventCategories eventName,
 			String clientID) throws RemoteException {
 		try {
-			this.notifyEvent(clientID);
+			// this.notifyEvent(clientID);
 			try {
 				List<Athlete> scores = null;
 				if (MASTER_PUSH == false) {
@@ -293,7 +301,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 				} else {
 					scores = this.scoreCache.getScores(eventName);
 				}
-				System.out.println("Sending current scores for " + eventName + " from cache.");
+				System.out.println("Sending current scores for " + eventName
+						+ " from cache.");
 				return scores;
 			} catch (OlympicException o) {
 				if (MASTER_PUSH == true) {
@@ -304,7 +313,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 				List<Athlete> scores = orgetorixStub
 						.getCurrentScores(eventName);
 
-				System.out.println("Sending current scores for " + eventName + " from database.");
+				System.out.println("Sending current scores for " + eventName
+						+ " from database.");
 				if (scores == null) {
 					return null;
 				}
@@ -329,7 +339,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 */
 	public Tally getMedalTally(NationCategories teamName, String clientID) {
 		try {
-			this.notifyEvent(clientID);
+			// this.notifyEvent(clientID);
 			try {
 				Tally medalTally = null;
 				if (MASTER_PUSH == false) {
@@ -338,7 +348,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 				} else {
 					medalTally = this.tallyCache.getTally(teamName);
 				}
-				System.out.println("Sending medal tally for " + teamName + " from cache.");
+				System.out.println("Sending medal tally for " + teamName
+						+ " from cache.");
 				return medalTally;
 			} catch (OlympicException o) {
 				if (MASTER_PUSH == true) {
@@ -347,7 +358,8 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 							teamName);
 				}
 				Tally medalTally = orgetorixStub.getMedalTally(teamName);
-				System.out.println("Sending medal tally for " + teamName + " from database.");
+				System.out.println("Sending medal tally for " + teamName
+						+ " from database.");
 				if (medalTally == null) {
 					return null;
 				}
@@ -506,21 +518,24 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 			throws IOException, OlympicException {
 		Registry registry = null;
 
-		this.register(OBELIX_SERVICE_NAME, regService.getLocalIPAddress(),
-				JAVA_RMI_PORT);
+		// this.register(OBELIX_SERVICE_NAME, regService.getLocalIPAddress(),
+		// JAVA_RMI_PORT);
 		ObelixInterface serverStub = (ObelixInterface) UnicastRemoteObject
 				.exportObject(Obelix.getObelixInstance(), 0);
 		try {
 			registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(this.getServerName(), serverStub);
+			this.register(OBELIX_SERVICE_NAME, regService.getLocalIPAddress(),
+					JAVA_RMI_PORT);
 			System.err.println("Registry Service running at "
 					+ regService.getLocalIPAddress() + ":" + JAVA_RMI_PORT
 					+ ".");
 			System.err.println("Obelix ready.");
 		} catch (RemoteException e) {
 			registry = regService.setupLocalRegistry(JAVA_RMI_PORT);
-			// registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(this.getServerName(), serverStub);
+			this.register(OBELIX_SERVICE_NAME, regService.getLocalIPAddress(),
+					JAVA_RMI_PORT);
 			System.err.println("New Registry Service created. Obelix ready.");
 		}
 	}
@@ -534,24 +549,37 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	 */
 	public static void main(String args[]) throws OlympicException {
 		// Bind the remote object's stub in the registry
-		SERVICE_FINDER_HOST = (args.length < 1) ? null : args[0];
-		if (args[1].compareTo("--masterpush") == 0) {
+		if (args[0].compareTo("--masterpush") == 0) {
 			MASTER_PUSH = true;
-		} else {
+		} else if (args[0].compareTo("--proxypull") == 0) {
 			MASTER_PUSH = false;
+		} else {
+			usage();
+			System.exit(-1);
 		}
+
+		if (args.length < 2) {
+			usage();
+			System.exit(-1);
+		} else {
+			SERVICE_FINDER_HOST = args[1];
+		}
+
 		SERVICE_FINDER_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT
-				: Integer.parseInt(args[1]);
+				: Integer.parseInt(args[2]);
+
 		JAVA_RMI_PORT = (args.length < 4) ? DEFAULT_JAVA_RMI_PORT : Integer
-				.parseInt(args[2]);
+				.parseInt(args[3]);
+
 		final Obelix obelixInstance = Obelix.getObelixInstance();
 		try {
 			RegistryService regService = new RegistryService();
 			System.setProperty(JAVA_RMI_HOSTNAME_PROPERTY,
 					regService.getLocalIPAddress());
 			obelixInstance.setupObelixServer(regService);
+			obelixInstance.setupHeartbeatThread();
 			obelixInstance.setupOrgetorixStub();
-			obelixInstance.initiateElection();
+			// obelixInstance.initiateElection();
 		} catch (IOException e) {
 			throw new OlympicException(
 					"Registry Service could not be created.", e);
@@ -559,205 +587,221 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 
 	}
 
-	/**
-	 * Sets up a client stub of type BullyElectableFrontend.
-	 * 
-	 * @param participant
-	 * @throws RemoteException
-	 */
-	public LotteryManager getLotteryManagerClientStub(ServerDetail participant)
-			throws RemoteException {
-		Registry registry = null;
-		LotteryManager client = null;
-		registry = LocateRegistry.getRegistry(participant.getServiceAddress(),
-				participant.getServicePort());
-		try {
-			client = (LotteryManager) registry.lookup(participant
-					.getServerName());
-		} catch (NotBoundException e) {
-			e.printStackTrace();
-		}
-		return client;
+	private static void usage() {
+		System.out
+				.println("java -cp ./bin/ -Djava.rmi.server.codebase=file:./bin/"
+						+ " server.Obelix <insert host address displayed by ServiceFinder>"
+						+ " <insert port number displayed by ServiceFinder> [RMI_PORT]");
 	}
 
-	/**
-	 * Notifies the occurrence of a new event by synchronizing current process
-	 * timestamp with other processes. Each new request received counts as a new
-	 * event.
-	 * 
-	 * @param participantID
-	 * @throws RemoteException
-	 */
-	private void notifyEvent(String participantID) throws RemoteException {
-		long timestampValue = this.syncServers();
-		if (!lotteryFrozen) {
-			synchronized (this.localRequestCounter) {
-				localRequestCounter++;
-			}
-			if (timestampValue % lottery.lotteryEnterFrequency == 0) {
-				System.out.println("Entering " + participantID
-						+ " into lottery.");
-				this.addParticipant(participantID);
-				syncParticipants(participantID);
-			}
-		}
-	}
-
-	private void syncParticipants(String participantID) throws RemoteException {
-		List<ServerDetail> participants = findAllParticipants(OBELIX_SERVICE_NAME);
-		for (ServerDetail participant : participants) {
-			if (participant.getPID() == this.PID) {
-				continue;
-			}
-
-			LotteryManager clientStub = getLotteryManagerClientStub(participant);
-			clientStub.addParticipant(participantID);
-		}
-	}
-
-	public void addParticipant(String participantID) throws RemoteException {
-		synchronized (this.lottery) {
-			this.lottery.addParticipant(participantID);
-		}
-	}
-
-	/**
-	 * Implements totally-ordered multicasting. Multicasts current process'
-	 * timestamp and waits for updated timestamps from all processes.
-	 * 
-	 * @return Update timestamp for current process
-	 * @throws RemoteException
-	 */
-
-	private synchronized long syncServers() throws RemoteException {
-		this.timeStamp.tick();
-		List<ServerDetail> participants = findAllParticipants(OBELIX_SERVICE_NAME);
-		List<LamportClock> lamportClocks = new ArrayList<LamportClock>();
-		for (ServerDetail participant : participants) {
-			if (participant.getPID() == this.PID) {
-				continue;
-			}
-			LotteryManager clientStub = getLotteryManagerClientStub(participant);
-			lamportClocks.add(clientStub.notifyTimeStamp(this.timeStamp));
-		}
-		for (LamportClock incomingClock : lamportClocks) {
-			this.timeStamp.synchronizeTime(incomingClock);
-		}
-
-		return this.timeStamp.getTime();
-	}
-
-	/**
-	 * Utility function that initiates the lottery draw.
-	 * 
-	 * @return clientID of the winner of the lottery.
-	 * @throws RemoteException
-	 */
-	@Override
-	public String conductLottery() throws RemoteException {
-		List<ServerDetail> participants = findAllParticipants(OBELIX_SERVICE_NAME);
-		List<LotteryManager> clientStubs = new ArrayList<LotteryManager>();
-		for (ServerDetail participant : participants) {
-			LotteryManager clientStub = getLotteryManagerClientStub(participant);
-			clientStub.freezeLottery();
-			clientStubs.add(clientStub);
-		}
-		synchronized (this.lottery) {
-			String winner = this.lottery.conductDraw();
-			for (LotteryManager clientStub : clientStubs) {
-				clientStub.setLotteryWinner(winner);
-			}
-			return winner;
-		}
-	}
-
-	/**
-	 * Evaluation function to print the load statistics.
-	 */
-	@Override
-	public List<Double> getLoadStatistics() throws RemoteException {
-		List<Double> loadFactors = new ArrayList<Double>();
-		List<Double> loads = new ArrayList<Double>();
-		double totalLoad = 0.0;
-		List<ServerDetail> participants = findAllParticipants(OBELIX_SERVICE_NAME);
-		for (ServerDetail participant : participants) {
-			int load = 0;
-			if (participant.getPID() == this.PID) {
-				load = this.localRequestCounter;
-			}
-			LotteryManager clientStub = getLotteryManagerClientStub(participant);
-			load = clientStub.getRequestCount();
-			loads.add(new Double(load));
-			totalLoad += load;
-		}
-
-		for (Double load : loads) {
-			loadFactors.add(load / totalLoad);
-		}
-
-		return loadFactors;
-	}
-
-	/**
-	 * Set lottery enter frequency to specified value.
-	 * 
-	 * @param lotteryEnterFrequency
-	 */
-	@Override
-	public void setLotteryEnterFrequency(int lotteryEnterFrequency)
-			throws RemoteException {
-		List<ServerDetail> participants = findAllParticipants(OBELIX_SERVICE_NAME);
-		for (ServerDetail participant : participants) {
-			LotteryManager clientStub = getLotteryManagerClientStub(participant);
-			clientStub
-					.setLotteryEnterFrequency(this.PID, lotteryEnterFrequency);
-		}
-	}
-
-	@Override
-	public void setLotteryEnterFrequency(Integer PID, int lotteryEnterFrequency)
-			throws RemoteException {
-		lottery.lotteryEnterFrequency = lotteryEnterFrequency;
-	}
-
-	/**
-	 * Multicasts the current timestamp to other processes.
-	 * 
-	 * @return Updated timestamp of the current process.
-	 */
-
-	@Override
-	public LamportClock notifyTimeStamp(LamportClock incomingTimeStamp)
-			throws RemoteException {
-		this.timeStamp.synchronizeTime(incomingTimeStamp);
-		return this.timeStamp;
-	}
-
-	@Override
-	public int getRequestCount() throws RemoteException {
-		return this.localRequestCounter;
-	}
-
-	@Override
-	public void freezeLottery() throws RemoteException {
-		this.lotteryFrozen = true;
-	}
-
-	@Override
-	public void setLotteryWinner(String winnerID) throws RemoteException {
-		this.lotteryWinner = winnerID;
-	}
-
-	@Override
-	public String getLotteryWinner(String clientID) throws RemoteException {
-		System.err.println("Sending lottery winner information.");
-		notifyEvent(clientID);
-		if (this.lotteryWinner == null) {
-			return null;
-		} else {
-			return this.lotteryWinner;
-		}
-	}
+	// /**
+	// * Sets up a client stub of type BullyElectableFrontend.
+	// *
+	// * @param participant
+	// * @throws RemoteException
+	// */
+	// public LotteryManager getLotteryManagerClientStub(ServerDetail
+	// participant)
+	// throws RemoteException {
+	// Registry registry = null;
+	// LotteryManager client = null;
+	// registry = LocateRegistry.getRegistry(participant.getServiceAddress(),
+	// participant.getServicePort());
+	// try {
+	// client = (LotteryManager) registry.lookup(participant
+	// .getServerName());
+	// } catch (NotBoundException e) {
+	// e.printStackTrace();
+	// }
+	// return client;
+	// }
+	//
+	// /**
+	// * Notifies the occurrence of a new event by synchronizing current process
+	// * timestamp with other processes. Each new request received counts as a
+	// new
+	// * event.
+	// *
+	// * @param participantID
+	// * @throws RemoteException
+	// */
+	// private void notifyEvent(String participantID) throws RemoteException {
+	// long timestampValue = this.syncServers();
+	// if (!lotteryFrozen) {
+	// synchronized (this.localRequestCounter) {
+	// localRequestCounter++;
+	// }
+	// if (timestampValue % lottery.lotteryEnterFrequency == 0) {
+	// System.out.println("Entering " + participantID
+	// + " into lottery.");
+	// this.addParticipant(participantID);
+	// syncParticipants(participantID);
+	// }
+	// }
+	// }
+	//
+	// private void syncParticipants(String participantID) throws
+	// RemoteException {
+	// List<ServerDetail> participants =
+	// findAllParticipants(OBELIX_SERVICE_NAME);
+	// for (ServerDetail participant : participants) {
+	// if (participant.getPID() == this.PID) {
+	// continue;
+	// }
+	//
+	// LotteryManager clientStub = getLotteryManagerClientStub(participant);
+	// clientStub.addParticipant(participantID);
+	// }
+	// }
+	//
+	// public void addParticipant(String participantID) throws RemoteException {
+	// synchronized (this.lottery) {
+	// this.lottery.addParticipant(participantID);
+	// }
+	// }
+	//
+	// /**
+	// * Implements totally-ordered multicasting. Multicasts current process'
+	// * timestamp and waits for updated timestamps from all processes.
+	// *
+	// * @return Update timestamp for current process
+	// * @throws RemoteException
+	// */
+	//
+	// private synchronized long syncServers() throws RemoteException {
+	// this.timeStamp.tick();
+	// List<ServerDetail> participants =
+	// findAllParticipants(OBELIX_SERVICE_NAME);
+	// List<LamportClock> lamportClocks = new ArrayList<LamportClock>();
+	// for (ServerDetail participant : participants) {
+	// if (participant.getPID() == this.PID) {
+	// continue;
+	// }
+	// LotteryManager clientStub = getLotteryManagerClientStub(participant);
+	// lamportClocks.add(clientStub.notifyTimeStamp(this.timeStamp));
+	// }
+	// for (LamportClock incomingClock : lamportClocks) {
+	// this.timeStamp.synchronizeTime(incomingClock);
+	// }
+	//
+	// return this.timeStamp.getTime();
+	// }
+	//
+	// /**
+	// * Utility function that initiates the lottery draw.
+	// *
+	// * @return clientID of the winner of the lottery.
+	// * @throws RemoteException
+	// */
+	// @Override
+	// public String conductLottery() throws RemoteException {
+	// List<ServerDetail> participants =
+	// findAllParticipants(OBELIX_SERVICE_NAME);
+	// List<LotteryManager> clientStubs = new ArrayList<LotteryManager>();
+	// for (ServerDetail participant : participants) {
+	// LotteryManager clientStub = getLotteryManagerClientStub(participant);
+	// clientStub.freezeLottery();
+	// clientStubs.add(clientStub);
+	// }
+	// synchronized (this.lottery) {
+	// String winner = this.lottery.conductDraw();
+	// for (LotteryManager clientStub : clientStubs) {
+	// clientStub.setLotteryWinner(winner);
+	// }
+	// return winner;
+	// }
+	// }
+	//
+	// /**
+	// * Evaluation function to print the load statistics.
+	// */
+	// @Override
+	// public List<Double> getLoadStatistics() throws RemoteException {
+	// List<Double> loadFactors = new ArrayList<Double>();
+	// List<Double> loads = new ArrayList<Double>();
+	// double totalLoad = 0.0;
+	// List<ServerDetail> participants =
+	// findAllParticipants(OBELIX_SERVICE_NAME);
+	// for (ServerDetail participant : participants) {
+	// int load = 0;
+	// if (participant.getPID() == this.PID) {
+	// load = this.localRequestCounter;
+	// }
+	// LotteryManager clientStub = getLotteryManagerClientStub(participant);
+	// load = clientStub.getRequestCount();
+	// loads.add(new Double(load));
+	// totalLoad += load;
+	// }
+	//
+	// for (Double load : loads) {
+	// loadFactors.add(load / totalLoad);
+	// }
+	//
+	// return loadFactors;
+	// }
+	//
+	// /**
+	// * Set lottery enter frequency to specified value.
+	// *
+	// * @param lotteryEnterFrequency
+	// */
+	// @Override
+	// public void setLotteryEnterFrequency(int lotteryEnterFrequency)
+	// throws RemoteException {
+	// List<ServerDetail> participants =
+	// findAllParticipants(OBELIX_SERVICE_NAME);
+	// for (ServerDetail participant : participants) {
+	// LotteryManager clientStub = getLotteryManagerClientStub(participant);
+	// clientStub
+	// .setLotteryEnterFrequency(this.PID, lotteryEnterFrequency);
+	// }
+	// }
+	//
+	// @Override
+	// public void setLotteryEnterFrequency(Integer PID, int
+	// lotteryEnterFrequency)
+	// throws RemoteException {
+	// lottery.lotteryEnterFrequency = lotteryEnterFrequency;
+	// }
+	//
+	// /**
+	// * Multicasts the current timestamp to other processes.
+	// *
+	// * @return Updated timestamp of the current process.
+	// */
+	//
+	// @Override
+	// public LamportClock notifyTimeStamp(LamportClock incomingTimeStamp)
+	// throws RemoteException {
+	// this.timeStamp.synchronizeTime(incomingTimeStamp);
+	// return this.timeStamp;
+	// }
+	//
+	// @Override
+	// public int getRequestCount() throws RemoteException {
+	// return this.localRequestCounter;
+	// }
+	//
+	// @Override
+	// public void freezeLottery() throws RemoteException {
+	// this.lotteryFrozen = true;
+	// }
+	//
+	// @Override
+	// public void setLotteryWinner(String winnerID) throws RemoteException {
+	// this.lotteryWinner = winnerID;
+	// }
+	//
+	// @Override
+	// public String getLotteryWinner(String clientID) throws RemoteException {
+	// System.err.println("Sending lottery winner information.");
+	// notifyEvent(clientID);
+	// if (this.lotteryWinner == null) {
+	// return null;
+	// } else {
+	// return this.lotteryWinner;
+	// }
+	// }
 
 	@Override
 	public void notifyScoreCaching(String serverID, EventCategories eventName)
@@ -815,24 +859,33 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	private void cleanUpTallyCaches(NationCategories nation)
 			throws RemoteException {
 		for (String subscriber : this.tallyCacherList.keySet()) {
-			ObelixInterface stub = this.getObelixSlaveStub(subscriber);
-			stub.invalidateTallies(nation);
+			try {
+				ObelixInterface stub = this.getObelixSlaveStub(subscriber);
+				stub.invalidateTallies(nation);
+			} catch (ConnectException e) {
+			}
 		}
 	}
 
 	private void cleanUpResultCaches(EventCategories eventName)
 			throws RemoteException {
 		for (String subscriber : this.resultCacherList.keySet()) {
-			ObelixInterface stub = this.getObelixSlaveStub(subscriber);
-			stub.invalidateResults(eventName);
+			try {
+				ObelixInterface stub = this.getObelixSlaveStub(subscriber);
+				stub.invalidateResults(eventName);
+			} catch (ConnectException e) {
+			}
 		}
 	}
 
 	private void cleanUpScoreCaches(EventCategories eventName)
 			throws RemoteException {
 		for (String subscriber : this.scoreCacherList.keySet()) {
-			ObelixInterface stub = this.getObelixSlaveStub(subscriber);
-			stub.invalidateScores(eventName);
+			try {
+				ObelixInterface stub = this.getObelixSlaveStub(subscriber);
+				stub.invalidateScores(eventName);
+			} catch (ConnectException e) {
+			}
 		}
 	}
 
@@ -841,7 +894,7 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 			return;
 		} else {
 			try {
-				this.broadCastMaster();
+				this.broadcastMaster();
 				RegistryService regService = new RegistryService();
 				System.setProperty(JAVA_RMI_HOSTNAME_PROPERTY,
 						regService.getLocalIPAddress());
@@ -857,13 +910,17 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 		}
 	}
 
-	public void broadCastMaster() throws RemoteException {
+	public void broadcastMaster() throws RemoteException {
 		List<ServerDetail> participants = new ArrayList<ServerDetail>();
-		participants.addAll(findAllParticipants(OBELIX_SERVICE_NAME));
+		// participants.addAll(findAllParticipants(OBELIX_SERVICE_NAME));
+		participants.addAll(getServersDetails(OBELIX_SERVICE_NAME));
 		for (ServerDetail participant : participants) {
-			ObelixInterface stub = this.getObelixSlaveStub(participant
-					.getServerName());
-			stub.setMaster(this.getServerName());
+			try {
+				ObelixInterface stub = this.getObelixSlaveStub(participant
+						.getServerName());
+				stub.setMaster(this.getServerName());
+			} catch (ConnectException e) {
+			}
 		}
 	}
 
@@ -871,5 +928,32 @@ public class Obelix extends BullyElectedBerkeleySynchronized implements
 	public void setMaster(String masterName) throws RemoteException {
 		this.OBELIX_MASTER_NAME = masterName;
 	}
+}
 
+class HeartbeatNotifier implements Runnable {
+
+	private Obelix obelixInstance;
+	private static int BEAT_PERIOD = 3000;
+
+	public HeartbeatNotifier() {
+	}
+
+	public HeartbeatNotifier(Obelix obelixInstance) {
+		this.obelixInstance = obelixInstance;
+	}
+
+	@Override
+	public void run() {
+		while (true) {
+			try {
+				obelixInstance.beat(obelixInstance.getServerName());
+				// System.err.println("Sending heartbeat msg.");
+				Thread.sleep(BEAT_PERIOD);
+			} catch (RemoteException e) {
+				e.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+	}
 }

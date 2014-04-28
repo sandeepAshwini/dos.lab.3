@@ -25,7 +25,7 @@ import client.Tablet;
 public class TabletSimulator {
 
 	private static int DEFAULT_TABLET_LIMIT = 5;
-	private static int PROCESS_ORDERING_TABLET_LIMIT = 5;
+	//private static int PROCESS_ORDERING_TABLET_LIMIT = 5;
 	private static int JAVA_RMI_PORT;
 	private static int DEFAULT_JAVA_RMI_PORT = 1099;
 	private static String SERVICE_FINDER_NAME = "ServiceFinder";
@@ -75,60 +75,60 @@ public class TabletSimulator {
 		}
 	}
 
-	/**
-	 * Tests if the processes are ordered correctly by making requests from
-	 * tablets one at a time.
-	 * 
-	 * @param tablets
-	 * @throws RemoteException
-	 * @throws InterruptedException
-	 */
-	private static void testProcessOrdering(List<Tablet> tablets)
-			throws RemoteException, InterruptedException {
-		Tablet.pollTally = false;
-		LotteryManager clientStub = getObelixFrontendClientStub();
-		clientStub.setLotteryEnterFrequency(PROCESS_ORDERING_TABLET_LIMIT);
-		System.out.println(tablets.size());
-		System.out.println("Tablet "
-				+ tablets.get(PROCESS_ORDERING_TABLET_LIMIT - 1)
-						.getServerName()
-				+ " will always be entered into the lottery.");
-		for (int count = 0; count < 10; count++) {
-			for (Tablet tablet : tablets) {
-				tablet.getResults(EventCategories.STONE_LUGING);
-				Thread.sleep(500);
-			}
-		}
-		Tablet.pollTally = true;
-	}
-
-	public static LotteryManager getObelixFrontendClientStub()
-			throws RemoteException {
-		ServerDetail obelixDetail = serviceFinderStub
-				.getService(OBELIX_SERVICE_NAME);
-		return getLotteryManagerClientStub(obelixDetail);
-	}
-
-	/**
-	 * Sets up a client stub of type BullyElectableFrontend.
-	 * 
-	 * @param participant
-	 * @throws RemoteException
-	 */
-	private static LotteryManager getLotteryManagerClientStub(
-			ServerDetail participant) throws RemoteException {
-		Registry registry = null;
-		LotteryManager client = null;
-		registry = LocateRegistry.getRegistry(participant.getServiceAddress(),
-				participant.getServicePort());
-		try {
-			client = (LotteryManager) registry.lookup(participant
-					.getServerName());
-		} catch (NotBoundException e) {
-			e.printStackTrace();
-		}
-		return client;
-	}
+//	/**
+//	 * Tests if the processes are ordered correctly by making requests from
+//	 * tablets one at a time.
+//	 * 
+//	 * @param tablets
+//	 * @throws RemoteException
+//	 * @throws InterruptedException
+//	 */
+//	private static void testProcessOrdering(List<Tablet> tablets)
+//			throws RemoteException, InterruptedException {
+//		Tablet.pollTally = false;
+//		LotteryManager clientStub = getObelixFrontendClientStub();
+//		clientStub.setLotteryEnterFrequency(PROCESS_ORDERING_TABLET_LIMIT);
+//		System.out.println(tablets.size());
+//		System.out.println("Tablet "
+//				+ tablets.get(PROCESS_ORDERING_TABLET_LIMIT - 1)
+//						.getServerName()
+//				+ " will always be entered into the lottery.");
+//		for (int count = 0; count < 10; count++) {
+//			for (Tablet tablet : tablets) {
+//				tablet.getResults(EventCategories.STONE_LUGING);
+//				Thread.sleep(500);
+//			}
+//		}
+//		Tablet.pollTally = true;
+//	}
+//
+//	public static LotteryManager getObelixFrontendClientStub()
+//			throws RemoteException {
+//		ServerDetail obelixDetail = serviceFinderStub
+//				.getService(OBELIX_SERVICE_NAME);
+//		return getLotteryManagerClientStub(obelixDetail);
+//	}
+//
+//	/**
+//	 * Sets up a client stub of type BullyElectableFrontend.
+//	 * 
+//	 * @param participant
+//	 * @throws RemoteException
+//	 */
+//	private static LotteryManager getLotteryManagerClientStub(
+//			ServerDetail participant) throws RemoteException {
+//		Registry registry = null;
+//		LotteryManager client = null;
+//		registry = LocateRegistry.getRegistry(participant.getServiceAddress(),
+//				participant.getServicePort());
+//		try {
+//			client = (LotteryManager) registry.lookup(participant
+//					.getServerName());
+//		} catch (NotBoundException e) {
+//			e.printStackTrace();
+//		}
+//		return client;
+//	}
 
 	/**
 	 * Sets up the {@link ServiceFinder} client stub used to register and lookup
@@ -157,7 +157,14 @@ public class TabletSimulator {
 	 */
 	public static void main(String[] args) throws OlympicException,
 			IOException, NotBoundException {
-		String serviceFinderHost = (args.length < 1) ? null : args[0];
+		String serviceFinderHost = null;
+
+		if(args.length < 1) {
+			usage();
+			System.exit(-1);
+		} else {
+			serviceFinderHost = args[0];
+		}
 		int serviceFinderPort = (args.length < 2) ? DEFAULT_JAVA_RMI_PORT
 				: Integer.parseInt(args[1]);
 		JAVA_RMI_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT : Integer
@@ -174,5 +181,11 @@ public class TabletSimulator {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	private static void usage() {
+		System.out.println("java -cp ./bin/ -Djava.rmi.server.codebase=file:./bin/ sim.TabletSimulator"
+				+ " <insert host address displayed by ServiceFinder>"
+				+ " <insert port number displayed by ServiceFinder> [RMI_PORT] [number of tablets]");
 	}
 }

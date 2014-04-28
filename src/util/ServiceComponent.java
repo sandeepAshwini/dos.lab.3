@@ -109,10 +109,15 @@ public abstract class ServiceComponent {
 			throws RemoteException {
 		return serviceFinderStub.getService(serviceName);
 	}
+	
+	public ServerDetail getServerDetails(String serviceName, String requesterID)
+			throws RemoteException {
+		return serviceFinderStub.getService(serviceName, requesterID);
+	}
 
 	public ServerDetail getSpecificServerDetails(String serverName)
 			throws RemoteException {
-		return serviceFinderStub.getServer(serverName);
+		return serviceFinderStub.getServerDetail(serverName);
 	}
 
 	
@@ -127,5 +132,9 @@ public abstract class ServiceComponent {
 	public List<ServerDetail> getServersDetails(String serviceName)
 			throws RemoteException {
 		return serviceFinderStub.getServices(serviceName);
+	}
+	
+	public void beat(String serverName) throws RemoteException {
+		serviceFinderStub.beat(serverName);
 	}
 }

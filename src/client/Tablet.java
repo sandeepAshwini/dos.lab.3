@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.rmi.ConnectException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -45,6 +46,8 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	private static String JAVA_RMI_HOSTNAME_PROPERTY = "java.rmi.server.hostname";
 	private static String SERVICE_FINDER_HOST;
 	private static int SERVICE_FINDER_PORT;
+	private static int RETRY_LIMIT = 3;
+	private static int RETRY_WAIT = 3000;
 
 	// Used only to test lamport clock synchronization.
 	public static boolean pollTally = true;
@@ -73,7 +76,7 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	 * Members specifying the server name(Obelix) and the base client
 	 * identifier.
 	 */
-	private static String OBELIX_SERVER_NAME = "Obelix";
+	private static String OBELIX_SERVICE_NAME = "Obelix";
 	private static String CLIENT_BASE_NAME = "Client_";
 
 	/**
@@ -97,7 +100,12 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	 * @throws OlympicException
 	 */
 	public static void main(String[] args) throws OlympicException {
-		SERVICE_FINDER_HOST = (args.length < 1) ? null : args[0];
+		if (args.length < 1) {
+			usage();
+			System.exit(-1);
+		} else {
+			SERVICE_FINDER_HOST = args[0];
+		}
 		SERVICE_FINDER_PORT = (args.length < 2) ? DEFAULT_JAVA_RMI_PORT
 				: Integer.parseInt(args[1]);
 		JAVA_RMI_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT : Integer
@@ -109,6 +117,13 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 		} else {
 			throw new OlympicException("Could not instantiate tablet.");
 		}
+	}
+
+	private static void usage() {
+		System.out
+				.println("java -cp ./bin/ -Djava.rmi.server.codebase=file:./bin/ client.Tablet"
+						+ " <insert host address displayed by ServiceFinder>"
+						+ " <insert port number displayed by ServiceFinder> [RMI_PORT]");
 	}
 
 	/**
@@ -178,9 +193,9 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 				case 3:
 					this.getCurrentScore();
 					break;
-				case 4:
-					this.getLotteryWinner();
-					break;
+				//case 4:
+				//	this.getLotteryWinner();
+				//	break;
 				// case 5: this.subscribeTo();
 				// this.waitToResume();
 				// this.resumeMenuLoop = false; break;
@@ -211,9 +226,22 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	}
 
 	private void setupObelixStub() throws RemoteException {
-		ServerDetail obelixDetail = this.getServerDetails(OBELIX_SERVER_NAME);
-		ObelixInterface obelixStub = connectToObelix(obelixDetail);
-		this.setObelixStub(obelixStub);
+		for (int i = 0; i < RETRY_LIMIT; i++) {
+			try {
+				ServerDetail obelixDetail = this.getServerDetails(OBELIX_SERVICE_NAME, this.getServerName());
+				ObelixInterface obelixStub = connectToObelix(obelixDetail);
+				this.setObelixStub(obelixStub);
+			} catch (ConnectException e) {
+				if (i >= RETRY_LIMIT) {
+					throw e;
+				}
+				try {
+					Thread.sleep(RETRY_WAIT);
+				} catch (InterruptedException e1) {
+					e1.printStackTrace();
+				}
+			}
+		}		
 	}
 
 	/**
@@ -222,8 +250,9 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	 * 
 	 * @param obelixHost
 	 * @return ObelixInterface
+	 * @throws ConnectException 
 	 */
-	private static ObelixInterface connectToObelix(ServerDetail obelixDetail) {
+	private static ObelixInterface connectToObelix(ServerDetail obelixDetail) throws ConnectException {
 		Registry registry = null;
 		ObelixInterface obelixStub = null;
 
@@ -233,6 +262,8 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 					obelixDetail.getServicePort());
 			obelixStub = (ObelixInterface) registry.lookup(obelixDetail
 					.getServerName());
+		} catch (ConnectException e) {
+			throw e;
 		} catch (RemoteException e) {
 			e.printStackTrace();
 		} catch (NotBoundException e) {
@@ -263,7 +294,7 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 			System.err.println("Tablet ready.");
 		} catch (RemoteException e) {
 			registry = regService.setupLocalRegistry(JAVA_RMI_PORT);
-//			registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
+			// registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(this.getServerName(), tabletStub);
 			System.err.println("New Registry Service created. Tablet ready");
 		}
@@ -334,16 +365,18 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	}
 
 	public void getResults(EventCategories eventType) throws RemoteException {
-		this.setupObelixStub();
-		Results result = obelixStub.getResults(eventType, this.getServerName());
-		if (result != null) {
-			this.printCurrentResult(eventType, result);
-		} else {
-			try {
-				printToConsole("Event " + eventType.getCategory()
-						+ " hasn't completed yet.", null, null);
-			} catch (IOException e) {
-				e.printStackTrace();
+		synchronized (this.obelixStub) {
+			this.setupObelixStub();
+			Results result = obelixStub.getResults(eventType, this.getServerName());
+			if (result != null) {
+				this.printCurrentResult(eventType, result);
+			} else {
+				try {
+					printToConsole("Event " + eventType.getCategory()
+							+ " hasn't completed yet.", null, null);
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 			}
 		}
 	}
@@ -363,8 +396,10 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	}
 
 	public void getMedalTally(NationCategories nation) throws RemoteException {
-		this.setupObelixStub();
 		synchronized (this.medalTallies) {
+			if (pollTally == false) {
+				this.updateMedalTallies();
+			}
 			Tally medalTally = this.medalTallies.get(nation);
 			this.printCurrentTally(nation, medalTally);
 		}
@@ -378,10 +413,13 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	public void updateMedalTallies() throws RemoteException {
 		synchronized (this.medalTallies) {
 			for (NationCategories nation : NationCategories.values()) {
-				this.medalTallies.put(
-						nation,
-						this.obelixStub.getMedalTally(nation,
-								this.getServerName()));
+				synchronized(this.obelixStub) {
+					this.setupObelixStub();
+					this.medalTallies.put(
+							nation,
+							this.obelixStub.getMedalTally(nation,
+									this.getServerName()));
+				}				
 			}
 		}
 	}
@@ -410,46 +448,49 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 
 	public void getCurrentScore(EventCategories eventType)
 			throws RemoteException {
-		this.setupObelixStub();
-		List<Athlete> scores = this.obelixStub.getCurrentScores(eventType,
-				this.getServerName());
-		if (scores != null && scores.size() != 0) {
-			printCurrentScore(eventType, scores);
-		} else {
-			try {
-				printToConsole("Event " + eventType.getCategory()
-						+ " hasn't started yet.", null, null);
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
-	}
-
-	public void getLotteryWinner() throws RemoteException {
-		this.setupObelixStub();
-		String winner = this.obelixStub.getLotteryWinner(this.getServerName());
-		try {
-
-			if (winner != null) {
-				if (winner.equals(this.getServerName())) {
-					printToConsole(
-							"You are the lucky winner. Congratulations.", null,
-							null);
-
-				} else {
-					printToConsole("The lucky winner is " + winner + ".", null,
-							null);
-				}
-
+		synchronized (this.obelixStub) {
+			this.setupObelixStub();
+			List<Athlete> scores = this.obelixStub.getCurrentScores(eventType,
+					this.getServerName());
+			if (scores != null && scores.size() != 0) {
+				printCurrentScore(eventType, scores);
 			} else {
-				printToConsole("Lottery Results are not yet available.", null,
-						null);
+				try {
+					printToConsole("Event " + eventType.getCategory()
+							+ " hasn't started yet.", null, null);
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 			}
-		} catch (IOException e) {
-			e.printStackTrace();
 		}
-
 	}
+
+//	public void getLotteryWinner() throws RemoteException {
+//		synchronized(this.obelixStub) {
+//			this.setupObelixStub();
+//			String winner = this.obelixStub.getLotteryWinner(this.getServerName());
+//			try {
+//
+//				if (winner != null) {
+//					if (winner.equals(this.getServerName())) {
+//						printToConsole(
+//								"You are the lucky winner. Congratulations.", null,
+//								null);
+//
+//					} else {
+//						printToConsole("The lucky winner is " + winner + ".", null,
+//								null);
+//					}
+//
+//				} else {
+//					printToConsole("Lottery Results are not yet available.", null,
+//							null);
+//				}
+//			} catch (IOException e) {
+//				e.printStackTrace();
+//			}
+//		}
+//	}
 
 	/**
 	 * Pretty prints the results of the specified event to the console.
@@ -607,7 +648,7 @@ class TallyUpdater implements Runnable {
 
 	public TallyUpdater(Tablet tabletInstance) {
 		this.tabletInstance = tabletInstance;
-		this.updatePeriod = 2500;
+		this.updatePeriod = 3000;
 	}
 
 	public TallyUpdater(Tablet tabletInstance, int updatePeriod) {

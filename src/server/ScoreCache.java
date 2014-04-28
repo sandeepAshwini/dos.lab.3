@@ -7,7 +7,6 @@ import java.util.Map;
 import base.Athlete;
 import base.EventCategories;
 import base.OlympicException;
-import base.Results;
 
 public class ScoreCache {
 	private Map<EventCategories, List<Athlete>> scoreCache;

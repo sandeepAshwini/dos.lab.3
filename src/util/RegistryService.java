@@ -20,8 +20,8 @@ import base.OlympicException;
  */
 public class RegistryService {
 	private static int PROPAGATION_INTERVAL = 5000;
-	private static String RMI_COMMAND = "rmiregistry";
-	private static String USE_CODEBASE_ONLY_FALSE = "-J-Djava.rmi.server.useCodebaseOnly=false";
+	//private static String RMI_COMMAND = "rmiregistry";
+	//private static String USE_CODEBASE_ONLY_FALSE = "-J-Djava.rmi.server.useCodebaseOnly=false";
 
 	public RegistryService() {
 	}

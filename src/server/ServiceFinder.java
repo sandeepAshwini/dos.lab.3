@@ -6,8 +6,14 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 import util.RegistryService;
 import util.ServerDetail;
@@ -26,8 +32,12 @@ public class ServiceFinder implements ServiceFinderInterface {
 	private static String JAVA_RMI_HOSTNAME_PROPERTY = "java.rmi.server.hostname";
 	private static int JAVA_RMI_PORT;
 	private static int DEFAULT_JAVA_RMI_PORT = 1099;
+	private static String OBELIX_SERVICE_NAME = "Obelix";
 
 	private List<ServerDetail> services = new ArrayList<ServerDetail>();
+	private Map<String, Long> heartbeats = new HashMap<String, Long>();
+	private Map<String, Set<String>> clientStates = new HashMap<String, Set<String>>();
+	private String cacophonixState = null;
 
 	public ServiceFinder() {
 		random = new Random();
@@ -43,10 +53,17 @@ public class ServiceFinder implements ServiceFinderInterface {
 			System.setProperty(JAVA_RMI_HOSTNAME_PROPERTY,
 					regService.getLocalIPAddress());
 			serviceFinderInstance.setupServiceFinder(regService);
+			serviceFinderInstance.setupLoadBalancingThread();
 		} catch (IOException e) {
 			throw new OlympicException(
 					"Registry Service could not be created.", e);
 		}
+	}
+
+	private void setupLoadBalancingThread() {
+		Thread thread = new Thread(new LoadBalancer(this.heartbeats,
+				this.services, this.clientStates));
+		thread.start();
 	}
 
 	private static ServiceFinder getServiceFinderInstance() {
@@ -81,7 +98,7 @@ public class ServiceFinder implements ServiceFinderInterface {
 			System.err.println("ServiceFinder ready.");
 		} catch (RemoteException e) {
 			registry = regService.setupLocalRegistry(JAVA_RMI_PORT);
-//			registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
+			// registry = LocateRegistry.getRegistry(JAVA_RMI_PORT);
 			registry.rebind(SERVER_NAME, serverStub);
 			System.err
 					.println("New Registry Service created. ServiceFinder ready.");
@@ -98,9 +115,16 @@ public class ServiceFinder implements ServiceFinderInterface {
 	@Override
 	public void registerService(String serviceName, int PID, String address,
 			int rmiPort) throws RemoteException {
+		ServerDetail newServerDetail = new ServerDetail(serviceName, PID,
+				address, rmiPort);
 		synchronized (this.services) {
-			this.services.add(new ServerDetail(serviceName, PID, address,
-					rmiPort));
+			this.services.add(newServerDetail);
+			synchronized (this.clientStates) {
+				if (serviceName.compareTo(OBELIX_SERVICE_NAME) == 0) {
+					this.clientStates.put(newServerDetail.getServerName(),
+							new HashSet<String>());
+				}
+			}
 		}
 	}
 
@@ -117,7 +141,48 @@ public class ServiceFinder implements ServiceFinderInterface {
 		List<ServerDetail> matchingServices = getServices(serviceName);
 		int num = random.nextInt(matchingServices.size());
 		ServerDetail pickedService = matchingServices.get(num);
-		System.out.println("Resolved " + serviceName + " to " + pickedService.getServerName() + ".");
+		// System.out.println("Resolved " + serviceName + " to "
+		// + pickedService.getServerName() + ".");
+		return pickedService;
+	}
+
+	@Override
+	public ServerDetail getService(String serviceName, String requesterID)
+			throws RemoteException {
+		ServerDetail pickedService = null;
+
+		synchronized (this.services) {
+			List<ServerDetail> matchingServices = getServices(serviceName);
+			int num = random.nextInt(matchingServices.size());
+
+			if (requesterID.startsWith("Cacophonix")) {
+				pickedService = Collections.max(matchingServices);
+				// System.out.println(pickedService.getServicePort());
+			} else if (requesterID.startsWith("Client")) {
+				synchronized (this.clientStates) {
+					for (String instance : clientStates.keySet()) {
+						if (clientStates.get(instance).contains(requesterID)) {
+							pickedService = getServerDetail(instance);
+							break;
+						}
+					}
+					if (pickedService == null) {
+						pickedService = matchingServices.get(num);
+						Set<String> clients = this.clientStates
+								.get(pickedService.getServerName());
+						if (clients == null) {
+							clients = new HashSet<String>();
+							this.clientStates.put(
+									pickedService.getServerName(), clients);
+						}
+						clients.add(requesterID);
+					}
+				}
+			}
+		}
+
+		// System.out.println("Resolved " + serviceName + " to "
+		// + pickedService.getServerName() + ".");
 		return pickedService;
 	}
 
@@ -139,9 +204,8 @@ public class ServiceFinder implements ServiceFinderInterface {
 		}
 		return matchingServices;
 	}
-	
-	
-	public ServerDetail getServer(String serverName)
+
+	public ServerDetail getServerDetail(String serverName)
 			throws RemoteException {
 		synchronized (this.services) {
 			for (ServerDetail curServerDetail : this.services) {
@@ -152,5 +216,111 @@ public class ServiceFinder implements ServiceFinderInterface {
 		}
 		return null;
 	}
-	
+
+	@Override
+	public void beat(String serverName) throws RemoteException {
+		// System.err.println("Received hearbeat from " + serverName);
+		synchronized (this.heartbeats) {
+			heartbeats.put(serverName, System.currentTimeMillis());
+		}
+	}
+}
+
+class LoadBalancer implements Runnable {
+
+	private Map<String, Long> heartbeats;
+	private List<ServerDetail> services;
+	private Map<String, Set<String>> clientStates;
+	private static int REBALANCING_INTERVAL = 1500;
+	private static int HOLD_TIME = 3500;
+	private static String OBELIX_SERVICE_NAME = "Obelix";
+
+	public LoadBalancer(Map<String, Long> heartbeats,
+			List<ServerDetail> services, Map<String, Set<String>> clientStates) {
+		this.services = services;
+		this.heartbeats = heartbeats;
+		this.clientStates = clientStates;
+	}
+
+	private void removeStaleServers(Set<String> staleServerNames) {
+		List<ServerDetail> staleServers = new ArrayList<ServerDetail>();
+		synchronized (this.services) {
+			System.out.println(staleServerNames);
+			for (ServerDetail service : this.services) {
+				if (staleServerNames.contains(service.getServerName())) {
+					staleServers.add(service);
+				}
+			}
+			for (ServerDetail staleServer : staleServers) {
+				services.remove(staleServer);
+			}
+		}
+	}
+
+	@Override
+	public void run() {
+		Random random = new Random();
+		while (true) {
+			Set<String> staleServerNames = new HashSet<String>();
+			Set<String> orphanClients = new HashSet<String>();
+
+			synchronized (this.heartbeats) {
+				for (String serverName : heartbeats.keySet()) {
+					if (System.currentTimeMillis() - heartbeats.get(serverName) >= HOLD_TIME) {
+						staleServerNames.add(serverName);
+					}
+				}
+				for (String staleServerName : staleServerNames) {
+					heartbeats.remove(staleServerName);
+				}
+			}
+			
+			removeStaleServers(staleServerNames);
+			
+			synchronized (this.clientStates) {
+				for (String staleServerName : staleServerNames) {
+					Set<String> removedClients = clientStates
+							.remove(staleServerName);
+					orphanClients.addAll(removedClients);
+				}
+				
+				for (String orphanClient : orphanClients) {
+					List<ServerDetail> obelixServers = new ArrayList<ServerDetail>();
+					for (ServerDetail service : services) {
+						if(service.getServiceName().compareTo(OBELIX_SERVICE_NAME) == 0) {
+							obelixServers.add(service);
+						}
+					}
+					ServerDetail pickedObelixService = obelixServers.get(random
+							.nextInt(obelixServers.size()));
+					Set<String> clients = this.clientStates
+							.get(pickedObelixService.getServerName());
+					clients.add(orphanClient);
+				}
+
+				System.out.println("Balancing...");
+				List<String> clients = new ArrayList<String>();
+				for (String instance : clientStates.keySet()) {
+					clients.addAll(clientStates.get(instance));
+					clientStates.put(instance, new HashSet<String>());
+				}
+				List<String> servers = new ArrayList<String>(
+						clientStates.keySet());
+				for (String client : clients) {
+					String pickedServer = servers.get(random.nextInt(servers
+							.size()));
+					clientStates.get(pickedServer).add(client);
+				}
+				for (String server : servers) {
+					System.out.println(clientStates.get(server).size());
+				}
+			}
+
+			try {
+				Thread.sleep(REBALANCING_INTERVAL);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+	}
 }

@@ -15,7 +15,9 @@ public interface ServiceFinderInterface extends Remote {
 	public List<ServerDetail> getServices(String serviceName)
 			throws RemoteException;
 	
-	public ServerDetail getServer(String serverName)throws RemoteException;
+	public ServerDetail getService(String serviceName, String requesterID) throws RemoteException;
 
+	public ServerDetail getServerDetail(String serverName) throws RemoteException;
+
+	public void beat(String serverName) throws RemoteException;
 }
-

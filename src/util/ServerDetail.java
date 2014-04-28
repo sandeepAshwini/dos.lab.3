@@ -9,7 +9,7 @@ import java.io.Serializable;
  * @author aravind
  * 
  */
-public class ServerDetail implements Serializable {
+public class ServerDetail implements Serializable, Comparable<ServerDetail> {
 	private static final long serialVersionUID = -7853196643095509724L;
 	private String serviceName;
 	private int PID;
@@ -58,5 +58,18 @@ public class ServerDetail implements Serializable {
 
 	public void setServicePort(int servicePort) {
 		this.servicePort = servicePort;
+	}
+
+	@Override
+	public int compareTo(ServerDetail that) {
+		String[] thisOctets = this.serviceAddress.split("\\.");
+		String[] thatOctets = that.serviceAddress.split("\\.");
+		for (int i = 0; i < thisOctets.length; i++) {
+			if (Integer.parseInt(thisOctets[i]) - Integer.parseInt(thatOctets[i]) == 0) {
+				continue;
+			}
+			return (Integer.parseInt(thisOctets[i]) - Integer.parseInt(thatOctets[i]));
+		}
+		return this.servicePort - that.servicePort;
 	}
 }

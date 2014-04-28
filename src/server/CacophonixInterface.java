@@ -20,5 +20,5 @@ public interface CacophonixInterface extends Remote {
 	public void updateCurrentScores(Event simulatedEvent,
 			List<Athlete> currentScores) throws RemoteException;
 
-	public String conductLottery() throws RemoteException;
+	//public String conductLottery() throws RemoteException;
 }

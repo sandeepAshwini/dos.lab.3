@@ -3,7 +3,6 @@ package server;
 import java.util.HashMap;
 import java.util.Map;
 
-import base.EventCategories;
 import base.NationCategories;
 import base.OlympicException;
 import base.Tally;
@@ -76,5 +75,4 @@ public class TallyCache {
 
 		}
 	}
-
 }

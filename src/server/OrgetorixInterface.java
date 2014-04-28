@@ -25,5 +25,5 @@ public interface OrgetorixInterface extends Remote {
 
 	public List<Athlete> getCurrentScores(EventCategories eventName)
 			throws RemoteException;
-	
+
 }

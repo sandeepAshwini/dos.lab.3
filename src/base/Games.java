@@ -99,8 +99,15 @@ public class Games extends ServiceComponent {
 	public static void main(String[] args) throws OlympicException {
 		long TIME_DELAY = 20 * 1000;
 		long SLEEP_DURATION = (long) 5.1 * 1000;
+		String serviceFinderHost = null;
 
-		String serviceFinderHost = (args.length < 1) ? null : args[0];
+		if(args.length < 1) {
+			usage();
+			System.exit(-1);
+		} else {
+			serviceFinderHost = args[0];
+		}
+		
 		int serviceFinderPort = (args.length < 2) ? DEFAULT_JAVA_RMI_PORT : Integer
 				.parseInt(args[1]);
 		JAVA_RMI_PORT = (args.length < 3) ? DEFAULT_JAVA_RMI_PORT : Integer
@@ -135,8 +142,8 @@ public class Games extends ServiceComponent {
 				}
 				Thread.sleep(TIME_DELAY);
 			}
-			System.err.println("Games ended. Now conducting lucky raffle.");
-			printCongratulatoryMsg(stub.conductLottery());
+			//System.err.println("Games ended. Now conducting lucky raffle.");
+			//printCongratulatoryMsg(stub.conductLottery());
 
 		} catch (NotBoundException e) {
 			throw new OlympicException("Cannot find Cacophonix.", e);
@@ -146,6 +153,12 @@ public class Games extends ServiceComponent {
 			throw new OlympicException("Games Interrupted.", e);
 		}
 
+	}
+	
+	private static void usage() {
+		System.out.println("java -cp ./bin/ base.Games"
+				+ " <insert host address displayed by ServiceFinder>"
+				+ " <insert port number displayed by ServiceFinder>"); 
 	}
 
 	/**
