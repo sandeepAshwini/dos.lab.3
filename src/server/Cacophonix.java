@@ -182,7 +182,7 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 				clientStub = (ObelixInterface) registry.lookup(obelixDetail
 						.getServerName());
 				Cacophonix.getCacophonixInstance().clientStub = clientStub;
-			} catch (ConnectException e) {
+			} catch (ConnectException | NotBoundException e) {
 				if (i >= RETRY_LIMIT) {
 					e.printStackTrace();
 				}
@@ -192,8 +192,6 @@ public class Cacophonix extends ServiceComponent implements CacophonixInterface 
 					e1.printStackTrace();
 				}
 			} catch (RemoteException e) {
-				e.printStackTrace();
-			} catch (NotBoundException e) {
 				e.printStackTrace();
 			}
 		}

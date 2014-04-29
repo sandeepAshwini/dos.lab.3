@@ -1,6 +1,8 @@
 package server;
 
 import java.io.IOException;
+import java.rmi.ConnectException;
+import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -37,7 +39,7 @@ public class ServiceFinder implements ServiceFinderInterface {
 	private List<ServerDetail> services = new ArrayList<ServerDetail>();
 	private Map<String, Long> heartbeats = new HashMap<String, Long>();
 	private Map<String, Set<String>> clientStates = new HashMap<String, Set<String>>();
-	private String cacophonixState = null;
+	private String currentMasterObelix = "";
 
 	public ServiceFinder() {
 		random = new Random();
@@ -155,9 +157,14 @@ public class ServiceFinder implements ServiceFinderInterface {
 			List<ServerDetail> matchingServices = getServices(serviceName);
 			int num = random.nextInt(matchingServices.size());
 
-			if (requesterID.startsWith("Cacophonix")) {
-				pickedService = Collections.max(matchingServices);
-				// System.out.println(pickedService.getServicePort());
+			if (requesterID.startsWith("Cacophonix") || requesterID.startsWith("Obelix")) {
+				synchronized (this.currentMasterObelix) {
+					pickedService = Collections.max(matchingServices);
+					if(!pickedService.getServerName().equals(currentMasterObelix)) {
+						this.currentMasterObelix = pickedService.getServerName();
+						notifyMasterObelix(pickedService, matchingServices);
+					}
+				}
 			} else if (requesterID.startsWith("Client")) {
 				synchronized (this.clientStates) {
 					for (String instance : clientStates.keySet()) {
@@ -184,6 +191,28 @@ public class ServiceFinder implements ServiceFinderInterface {
 		// System.out.println("Resolved " + serviceName + " to "
 		// + pickedService.getServerName() + ".");
 		return pickedService;
+	}
+	
+	private void notifyMasterObelix(ServerDetail obelixMasterDetail, List<ServerDetail> obelixServersDetails) throws RemoteException {
+		Registry registry = null;
+		ObelixInterface obelixMasterStub = null;
+
+		try {
+			registry = LocateRegistry.getRegistry(
+					obelixMasterDetail.getServiceAddress(),
+					obelixMasterDetail.getServicePort());
+			obelixMasterStub = (ObelixInterface) registry
+					.lookup(obelixMasterDetail.getServerName());
+		} catch (ConnectException e) {
+		} catch (NotBoundException e) {
+			e.printStackTrace();
+		}
+		
+		if (obelixMasterStub != null) {
+			obelixMasterStub.refreshCaches(obelixServersDetails);
+		}
+
+		return;
 	}
 
 	/**

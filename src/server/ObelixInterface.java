@@ -4,6 +4,7 @@ import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.List;
 
+import util.ServerDetail;
 import base.Athlete;
 import base.Event;
 import base.EventCategories;
@@ -57,9 +58,8 @@ public interface ObelixInterface extends Remote {
 
 	public void invalidateTallies(NationCategories nation)
 			throws RemoteException;
-
-	public void notifyMaster() throws RemoteException;
-
-	public void setMaster(String masterName) throws RemoteException;
-
+	
+	public void refreshCaches(List<ServerDetail> obelixServersDetails) throws RemoteException;
+	
+	public void clearCaches() throws RemoteException;
 }

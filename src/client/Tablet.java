@@ -221,17 +221,21 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	 */
 	private void setupTabletInstance(RegistryService regService)
 			throws IOException, OlympicException {
-		this.setupObelixStub();
-		this.setupTabletServer(regService);
+		try {
+			this.setupObelixStub();
+			this.setupTabletServer(regService);
+		} catch (NotBoundException e) {
+			throw new OlympicException("Could not contact Obelix.", e);
+		}		
 	}
 
-	private void setupObelixStub() throws RemoteException {
+	private void setupObelixStub() throws RemoteException, NotBoundException {
 		for (int i = 0; i < RETRY_LIMIT; i++) {
 			try {
 				ServerDetail obelixDetail = this.getServerDetails(OBELIX_SERVICE_NAME, this.getServerName());
 				ObelixInterface obelixStub = connectToObelix(obelixDetail);
 				this.setObelixStub(obelixStub);
-			} catch (ConnectException e) {
+			} catch (ConnectException | NotBoundException e) {
 				if (i >= RETRY_LIMIT) {
 					throw e;
 				}
@@ -252,7 +256,7 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	 * @return ObelixInterface
 	 * @throws ConnectException 
 	 */
-	private static ObelixInterface connectToObelix(ServerDetail obelixDetail) throws ConnectException {
+	private static ObelixInterface connectToObelix(ServerDetail obelixDetail) throws ConnectException, NotBoundException {
 		Registry registry = null;
 		ObelixInterface obelixStub = null;
 
@@ -262,11 +266,9 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 					obelixDetail.getServicePort());
 			obelixStub = (ObelixInterface) registry.lookup(obelixDetail
 					.getServerName());
-		} catch (ConnectException e) {
+		} catch (ConnectException | NotBoundException e) {
 			throw e;
 		} catch (RemoteException e) {
-			e.printStackTrace();
-		} catch (NotBoundException e) {
 			e.printStackTrace();
 		}
 
@@ -366,7 +368,11 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 
 	public void getResults(EventCategories eventType) throws RemoteException {
 		synchronized (this.obelixStub) {
-			this.setupObelixStub();
+			try {
+				this.setupObelixStub();
+			} catch (NotBoundException e1) {
+				e1.printStackTrace();
+			}
 			Results result = obelixStub.getResults(eventType, this.getServerName());
 			if (result != null) {
 				this.printCurrentResult(eventType, result);
@@ -414,7 +420,11 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 		synchronized (this.medalTallies) {
 			for (NationCategories nation : NationCategories.values()) {
 				synchronized(this.obelixStub) {
-					this.setupObelixStub();
+					try {
+						this.setupObelixStub();
+					} catch (NotBoundException e) {
+						e.printStackTrace();
+					}
 					this.medalTallies.put(
 							nation,
 							this.obelixStub.getMedalTally(nation,
@@ -449,7 +459,11 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	public void getCurrentScore(EventCategories eventType)
 			throws RemoteException {
 		synchronized (this.obelixStub) {
-			this.setupObelixStub();
+			try {
+				this.setupObelixStub();
+			} catch (NotBoundException e1) {
+				e1.printStackTrace();
+			}
 			List<Athlete> scores = this.obelixStub.getCurrentScores(eventType,
 					this.getServerName());
 			if (scores != null && scores.size() != 0) {

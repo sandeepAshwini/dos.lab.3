@@ -70,13 +70,15 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 	private static String SERVICE_FINDER_HOST;
 	private static int SERVICE_FINDER_PORT;
 	private static boolean MASTER_PUSH;
-	private OrgetorixInterface orgetorixStub;
-//	private Lottery lottery = new Lottery();
-//	private boolean lotteryFrozen;
-//	private Integer localRequestCounter = 0;
-//	private String lotteryWinner;
+	private static int RETRY_LIMIT = 3;
+	private static int RETRY_WAIT = 3000;
 
-	private String OBELIX_MASTER_NAME;
+	private OrgetorixInterface orgetorixStub;
+	// private Lottery lottery = new Lottery();
+	// private boolean lotteryFrozen;
+	// private Integer localRequestCounter = 0;
+	// private String lotteryWinner;
+
 	private Map<String, Set<EventCategories>> scoreCacherList;
 	private Map<String, Set<EventCategories>> resultCacherList;
 	private Map<String, Set<NationCategories>> tallyCacherList;
@@ -86,13 +88,15 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 		this.completedEvents = new HashSet<Event>();
 		this.subscriptionMap = new HashMap<EventCategories, Subscription>();
 		this.subscriberHostMap = new HashMap<String, String>();
-//		this.lotteryFrozen = false;
-//		this.lotteryWinner = null;
-
+		// this.lotteryFrozen = false;
+		// this.lotteryWinner = null;
+		this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
+		this.resultCacherList = new HashMap<String, Set<EventCategories>>();
+		this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
+		
 		this.tallyCache = new TallyCache();
 		this.scoreCache = new ScoreCache();
 		this.resultCache = new ResultCache();
-
 	}
 
 	/**
@@ -117,34 +121,65 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 		}
 	}
 
-	private ObelixInterface getObelixMasterStub() {
+	private ObelixInterface getObelixMasterStub() throws RemoteException, NotBoundException {
 		Registry registry = null;
 		ObelixInterface obelixMasterStub = null;
-		try {
-			ServerDetail obelixMasterDetail = this
-					.getSpecificServerDetails(OBELIX_MASTER_NAME);
-			registry = LocateRegistry.getRegistry(
-					obelixMasterDetail.getServiceAddress(),
-					obelixMasterDetail.getServicePort());
-			obelixMasterStub = (ObelixInterface) registry
-					.lookup(obelixMasterDetail.getServerName());
-		} catch (Exception e) {
-			e.printStackTrace();
+
+		for (int i = 0; i < RETRY_LIMIT; i++) {
+			try {
+				ServerDetail obelixMasterDetail = this.getServerDetails(
+						OBELIX_SERVICE_NAME, this.getServerName());
+				registry = LocateRegistry.getRegistry(
+						obelixMasterDetail.getServiceAddress(),
+						obelixMasterDetail.getServicePort());
+				obelixMasterStub = (ObelixInterface) registry
+						.lookup(obelixMasterDetail.getServerName());
+			} catch (ConnectException | NotBoundException e) {
+				if (i >= RETRY_LIMIT) {
+					throw e;
+				}
+				try {
+					Thread.sleep(RETRY_WAIT);
+				} catch (InterruptedException e1) {
+					e1.printStackTrace();
+				}
+			}
 		}
+
 		return obelixMasterStub;
 	}
 
-	private ObelixInterface getObelixSlaveStub(String serverName) throws RemoteException {
+	private ObelixInterface getObelixSlaveStub(String serverName)
+			throws RemoteException, ServerNotFoundException {
 		Registry registry = null;
 		ObelixInterface obelixSlaveStub = null;
 		try {
 			ServerDetail obelixSlaveDetail = this
 					.getSpecificServerDetails(serverName);
+			if (obelixSlaveDetail == null) {
+				throw new ServerNotFoundException("Obelix slave not found.");
+			}
 			registry = LocateRegistry.getRegistry(
 					obelixSlaveDetail.getServiceAddress(),
 					obelixSlaveDetail.getServicePort());
-			obelixSlaveStub = (ObelixInterface) registry.lookup(obelixSlaveDetail
-					.getServerName());
+			obelixSlaveStub = (ObelixInterface) registry
+					.lookup(obelixSlaveDetail.getServerName());
+		} catch (NotBoundException e) {
+			e.printStackTrace();
+		}
+		return obelixSlaveStub;
+	}
+	
+	private ObelixInterface getObelixSlaveStub(ServerDetail serverDetail)
+			throws RemoteException, ServerNotFoundException {
+		Registry registry = null;
+		ObelixInterface obelixSlaveStub = null;
+		try {
+			registry = LocateRegistry.getRegistry(
+					serverDetail.getServiceAddress(),
+					serverDetail.getServicePort());
+			obelixSlaveStub = (ObelixInterface) registry
+					.lookup(serverDetail.getServerName());
 		} catch (NotBoundException e) {
 			e.printStackTrace();
 		}
@@ -171,7 +206,6 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 	 */
 	public void updateResultsAndTallies(Event simulatedEvent)
 			throws RemoteException {
-		this.notifyMaster();
 		System.err.println("Received updateResultsAndTallies msg.");
 		if (MASTER_PUSH == true) {
 			System.err.println("Invalidating results and tallies in caches.");
@@ -193,7 +227,6 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 	 */
 	public void updateCurrentScores(EventCategories eventName,
 			List<Athlete> currentScores) throws RemoteException {
-		this.notifyMaster();
 		System.err.println("Received updateCurrentScores msg.");
 		if (MASTER_PUSH == true) {
 			System.err.println("Invalidating scores in caches.");
@@ -264,9 +297,12 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 					masterStub.notifyResultCaching(this.getServerName(),
 							eventName);
 				}
+
+				Results result = orgetorixStub.getResults(eventName);
+
 				System.out.println("Sending results for " + eventName
 						+ " from database.");
-				Results result = orgetorixStub.getResults(eventName);
+
 				if (result == null) {
 					return null;
 				}
@@ -277,9 +313,10 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 					this.resultCache.cache(eventName, result);
 
 				}
+
 				return result;
 			}
-		} catch (RemoteException r) {
+		} catch (RemoteException | NotBoundException e) {
 			return null;
 		}
 
@@ -327,7 +364,7 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 				}
 				return scores;
 			}
-		} catch (RemoteException r) {
+		} catch (RemoteException | NotBoundException e) {
 			return null;
 
 		}
@@ -372,7 +409,7 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 
 				return medalTally;
 			}
-		} catch (RemoteException r) {
+		} catch (RemoteException | NotBoundException e) {
 			return null;
 		}
 	}
@@ -863,6 +900,7 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 				ObelixInterface stub = this.getObelixSlaveStub(subscriber);
 				stub.invalidateTallies(nation);
 			} catch (ConnectException e) {
+			} catch (ServerNotFoundException e) {
 			}
 		}
 	}
@@ -874,6 +912,7 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 				ObelixInterface stub = this.getObelixSlaveStub(subscriber);
 				stub.invalidateResults(eventName);
 			} catch (ConnectException e) {
+			} catch (ServerNotFoundException e) {
 			}
 		}
 	}
@@ -885,48 +924,46 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 				ObelixInterface stub = this.getObelixSlaveStub(subscriber);
 				stub.invalidateScores(eventName);
 			} catch (ConnectException e) {
-			}
-		}
-	}
-
-	public void notifyMaster() throws RemoteException {
-		if (this.isMaster == true) {
-			return;
-		} else {
-			try {
-				this.broadcastMaster();
-				RegistryService regService = new RegistryService();
-				System.setProperty(JAVA_RMI_HOSTNAME_PROPERTY,
-						regService.getLocalIPAddress());
-				this.register(OBELIX_MASTER_NAME,
-						regService.getLocalIPAddress(), JAVA_RMI_PORT);
-			} catch (RemoteException | SocketException e) {
-				e.printStackTrace();
-			}
-			this.isMaster = true;
-			this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
-			this.resultCacherList = new HashMap<String, Set<EventCategories>>();
-			this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
-		}
-	}
-
-	public void broadcastMaster() throws RemoteException {
-		List<ServerDetail> participants = new ArrayList<ServerDetail>();
-		// participants.addAll(findAllParticipants(OBELIX_SERVICE_NAME));
-		participants.addAll(getServersDetails(OBELIX_SERVICE_NAME));
-		for (ServerDetail participant : participants) {
-			try {
-				ObelixInterface stub = this.getObelixSlaveStub(participant
-						.getServerName());
-				stub.setMaster(this.getServerName());
-			} catch (ConnectException e) {
+			} catch (ServerNotFoundException e) {
 			}
 		}
 	}
 
 	@Override
-	public void setMaster(String masterName) throws RemoteException {
-		this.OBELIX_MASTER_NAME = masterName;
+	public void refreshCaches(List<ServerDetail> obelixServersDetails) throws RemoteException {
+		synchronized(this.scoreCacherList) {
+			this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
+		}
+		
+		synchronized(this.resultCacherList) {
+			this.resultCacherList = new HashMap<String, Set<EventCategories>>();
+		}
+		
+		synchronized(this.tallyCacherList) {
+			this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
+		}
+		
+		for (ServerDetail obelixServerDetail : obelixServersDetails) {
+			try {
+				getObelixSlaveStub(obelixServerDetail).clearCaches();				
+			} catch (ServerNotFoundException e) {
+			}
+		}
+	}
+
+	@Override
+	public void clearCaches() throws RemoteException {
+		synchronized(this.tallyCache) {
+			this.tallyCache = new TallyCache();
+		}
+		
+		synchronized(this.scoreCache) {
+			this.scoreCache = new ScoreCache();
+		}
+		
+		synchronized(this.resultCache) {
+			this.resultCache = new ResultCache();
+		}		
 	}
 }
 
