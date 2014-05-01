@@ -50,7 +50,7 @@ public class Tablet extends ServiceComponent implements TabletInterface {
 	private static int RETRY_WAIT = 3000;
 
 	// Used only to test lamport clock synchronization.
-	public static boolean pollTally = true;
+	public static boolean pollTally = false;
 
 	public Tablet(String serviceFinderHost, int serviceFinderPort) {
 		super(CLIENT_BASE_NAME + UUID.randomUUID().toString(),

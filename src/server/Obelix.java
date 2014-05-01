@@ -53,8 +53,6 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 	private ResultCache resultCache;
 	private TallyCache tallyCache;
 
-	private boolean isMaster = false;
-
 	/**
 	 * Data structures to manage event subscriptions.private
 	 * Map<EventCategories, ArrayList<Athlete>> scores;
@@ -93,7 +91,7 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 		this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
 		this.resultCacherList = new HashMap<String, Set<EventCategories>>();
 		this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
-		
+
 		this.tallyCache = new TallyCache();
 		this.scoreCache = new ScoreCache();
 		this.resultCache = new ResultCache();
@@ -121,7 +119,8 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 		}
 	}
 
-	private ObelixInterface getObelixMasterStub() throws RemoteException, NotBoundException {
+	private ObelixInterface getObelixMasterStub() throws RemoteException,
+			NotBoundException {
 		Registry registry = null;
 		ObelixInterface obelixMasterStub = null;
 
@@ -169,7 +168,7 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 		}
 		return obelixSlaveStub;
 	}
-	
+
 	private ObelixInterface getObelixSlaveStub(ServerDetail serverDetail)
 			throws RemoteException, ServerNotFoundException {
 		Registry registry = null;
@@ -178,8 +177,8 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 			registry = LocateRegistry.getRegistry(
 					serverDetail.getServiceAddress(),
 					serverDetail.getServicePort());
-			obelixSlaveStub = (ObelixInterface) registry
-					.lookup(serverDetail.getServerName());
+			obelixSlaveStub = (ObelixInterface) registry.lookup(serverDetail
+					.getServerName());
 		} catch (NotBoundException e) {
 			e.printStackTrace();
 		}
@@ -930,40 +929,43 @@ public class Obelix extends ServiceComponent implements ObelixInterface {
 	}
 
 	@Override
-	public void refreshCaches(List<ServerDetail> obelixServersDetails) throws RemoteException {
-		synchronized(this.scoreCacherList) {
-			this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
-		}
-		
-		synchronized(this.resultCacherList) {
-			this.resultCacherList = new HashMap<String, Set<EventCategories>>();
-		}
-		
-		synchronized(this.tallyCacherList) {
-			this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
-		}
-		
-		for (ServerDetail obelixServerDetail : obelixServersDetails) {
-			try {
-				getObelixSlaveStub(obelixServerDetail).clearCaches();				
-			} catch (ServerNotFoundException e) {
+	public void refreshCaches(List<ServerDetail> obelixServersDetails)
+			throws RemoteException {
+		if (MASTER_PUSH) {
+			synchronized (this.scoreCacherList) {
+				this.scoreCacherList = new HashMap<String, Set<EventCategories>>();
+			}
+
+			synchronized (this.resultCacherList) {
+				this.resultCacherList = new HashMap<String, Set<EventCategories>>();
+			}
+
+			synchronized (this.tallyCacherList) {
+				this.tallyCacherList = new HashMap<String, Set<NationCategories>>();
+			}
+
+			for (ServerDetail obelixServerDetail : obelixServersDetails) {
+				try {
+					getObelixSlaveStub(obelixServerDetail).clearCaches();
+				} catch (ServerNotFoundException e) {
+				}
 			}
 		}
 	}
 
 	@Override
 	public void clearCaches() throws RemoteException {
-		synchronized(this.tallyCache) {
+		synchronized (this.tallyCache) {
 			this.tallyCache = new TallyCache();
 		}
-		
-		synchronized(this.scoreCache) {
+
+		synchronized (this.scoreCache) {
 			this.scoreCache = new ScoreCache();
 		}
-		
-		synchronized(this.resultCache) {
+
+		synchronized (this.resultCache) {
 			this.resultCache = new ResultCache();
-		}		
+		}
 	}
 }
 
